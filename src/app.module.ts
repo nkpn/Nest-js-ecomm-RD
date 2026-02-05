@@ -1,9 +1,11 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
-import { UserModule } from './user/user.module';
+import { OrdersModule } from './orders/order.module';
+import { UserModule } from './users/user.module';
 
 @Module({
   imports: [
+    OrdersModule,
     UserModule,
     ConfigModule.forRoot({
       isGlobal: true,

@@ -12,6 +12,11 @@ export class UsersController {
     return this.userService.getAll();
   }
 
+  @Get()
+  getUser(id): User[] {
+    return this.userService.getAll();
+  }
+
   @Post()
   @HttpCode(204)
   create(@Body() body: CreateUserDto): void {
