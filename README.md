@@ -33,10 +33,17 @@ npm run start:prod
 ```
 
 ## Modules
-# User
-User moduke provides 2 endpoints for creating a user and get all users.
+- Users (`/users`)
+- Orders (`/orders`)
+
+### Relationships (Many-to-One)
+- `Order` → `User` (many to one )
+- `OrderItem` → `Order` (many to one)
+
+### User
+User module provides endpoints for creating a user and get all users.
 Routes:
-- Get /users
+- GET /users
 - POST /users
 
 ## Environment Configuration
