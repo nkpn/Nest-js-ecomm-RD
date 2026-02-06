@@ -2,11 +2,13 @@ import { Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { OrdersModule } from './orders/order.module';
+import { ProductsModule } from './products/product.module';
 import { UserModule } from './users/user.module';
 
 @Module({
   imports: [
     OrdersModule,
+    ProductsModule,
     UserModule,
     ConfigModule.forRoot({
       isGlobal: true,
