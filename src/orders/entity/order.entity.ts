@@ -10,7 +10,7 @@ import {
   UpdateDateColumn,
 } from 'typeorm';
 import { User } from '../users/user.entity';
-import { OrderItem } from './order-item.entity';
+import { OrderItem } from '../order-item.entity';
 
 export enum OrderStatus {
   CREATED = 'CREATED',

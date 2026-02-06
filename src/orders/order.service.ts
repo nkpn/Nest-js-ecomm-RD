@@ -3,14 +3,15 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { CreateOrderDto } from './dto/create-order.dto';
 import { UpdateOrderDto } from './dto/update-order.dto';
-import { Order } from './order.entity';
+import { Order } from './entity/order.entity';
 import { OrderItem } from './order-item.entity';
 
 @Injectable()
 export class OrdersService {
   constructor(
     @InjectRepository(Order) private readonly ordersRepo: Repository<Order>,
-    @InjectRepository(OrderItem) private readonly itemsRepo: Repository<OrderItem>,
+    @InjectRepository(OrderItem)
+    private readonly itemsRepo: Repository<OrderItem>,
   ) {}
 
   async create(dto: CreateOrderDto): Promise<Order> {

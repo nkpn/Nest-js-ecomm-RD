@@ -4,6 +4,7 @@
 This is a modular e-commerce service with Domain Driven Design Architecture (hopefully) that supports following modules:
 - users
 - orders
+- products
 - payments
 - notifications
 and can be scaled to new domains.

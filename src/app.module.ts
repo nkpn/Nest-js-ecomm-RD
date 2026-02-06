@@ -17,10 +17,14 @@ import { UserModule } from './users/user.module';
       useFactory: (config: ConfigService) => ({
         type: 'postgres',
         host: config.get<string>('DB_HOST'),
-        port: Number(config.get<string>('DB_PORT')) || 5432,
+        port: Number(config.get<string>('DB_PORT')) || 1234,
         username: config.get<string>('DB_USER'),
         password: config.get<string>('DB_PASS'),
         database: config.get<string>('DB_NAME'),
+        ssl:
+          config.get('DB_SSL') === 'true'
+            ? { rejectUnauthorized: false }
+            : undefined,
         autoLoadEntities: true,
         synchronize: false,
       }),

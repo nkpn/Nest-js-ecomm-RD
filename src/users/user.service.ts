@@ -1,40 +1,52 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
-import { User } from './user.interface';
+import { InjectRepository } from '@nestjs/typeorm';
+import { Repository } from 'typeorm';
+import { User } from './user.entity';
 
 @Injectable()
 export class UsersService {
-  private readonly users: User[] = [];
+  constructor(
+    @InjectRepository(User)
+    private readonly userRepository: Repository<User>,
+  ) {}
 
-  create(user: User) {
-    this.users.push(user);
+  async create(email: string): Promise<User> {
+    const existingUser = await this.userRepository.findOne({
+      where: { email },
+    });
+    if (existingUser) return existingUser;
+
+    const user = this.userRepository.create({ email });
+    return this.userRepository.save(user);
   }
 
-  getAll(): User[] {
-    return this.users;
+  async getAll(): Promise<User[]> {
+    return this.userRepository.find();
   }
 
-  getUser(id: User['id']): User {
-    const user = this.users.find((u) => u.id === id);
+  async getUser(id: User['id']): Promise<User> {
+    const user = await this.userRepository.findOne({ where: { id } });
     if (!user) {
       throw new NotFoundException('User not found');
     }
     return user;
   }
 
-  updateUser(id: User['id'], updates: Partial<User>): User {
-    const index = this.users.findIndex((u) => u.id === id);
-    if (index === -1) {
+  async updateUser(id: User['id'], updates: Partial<User>): Promise<User> {
+    const user = await this.userRepository.preload({
+      id,
+      ...updates,
+    });
+    if (!user) {
       throw new NotFoundException('User not found');
     }
-    this.users[index] = { ...this.users[index], ...updates };
-    return this.users[index];
+    return this.userRepository.save(user);
   }
 
-  deleteUser(id: User['id']): void {
-    const index = this.users.findIndex((u) => u.id === id);
-    if (index === -1) {
+  async deleteUser(id: User['id']): Promise<void> {
+    const result = await this.userRepository.delete({ id });
+    if (!result.affected) {
       throw new NotFoundException('User not found');
     }
-    this.users.splice(index, 1);
   }
 }
