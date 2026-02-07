@@ -8,7 +8,7 @@ import {
   PrimaryGeneratedColumn,
   UpdateDateColumn,
 } from 'typeorm';
-import { Order } from './entity/order.entity';
+import { Order } from './order.entity';
 
 @Entity('order_items')
 @Index('IDX_order_items_order_id', ['orderId'])

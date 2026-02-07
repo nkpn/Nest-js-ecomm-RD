@@ -1,30 +1,42 @@
-import { Controller, Get, Post, Put, Body, HttpCode } from '@nestjs/common';
-import { UsersService } from './user.service';
+import {
+  Body,
+  Controller,
+  Delete,
+  Get,
+  Param,
+  Post,
+  Put,
+} from '@nestjs/common';
 import { CreateUserDto } from './dto/create-user.dto';
-import { User } from './user.interface';
+import { User } from './entity/user.entity';
+import { UsersService } from './user.service';
 
 @Controller('users')
 export class UsersController {
   constructor(private userService: UsersService) {}
 
   @Get()
-  getAll(): User[] {
+  getAll(): Promise<User[]> {
     return this.userService.getAll();
   }
 
-  @Get()
-  getUser(id): User[] {
-    return this.userService.getAll();
+  @Get(':id')
+  getUser(@Param('id') id: string): Promise<User> {
+    return this.userService.getUser(id);
   }
 
   @Post()
-  @HttpCode(204)
-  create(@Body() body: CreateUserDto): void {
-    this.userService.create(body);
+  create(@Body() body: CreateUserDto): Promise<User> {
+    return this.userService.create(body.email);
   }
 
-  @Put()
-  update(): string {
-    return 'update user data';
+  @Put(':id')
+  update(@Param('id') id: string, @Body() body: Partial<User>): Promise<User> {
+    return this.userService.updateUser(id, body);
+  }
+
+  @Delete(':id')
+  delete(@Param('id') id: string): Promise<void> {
+    return this.userService.deleteUser(id);
   }
 }

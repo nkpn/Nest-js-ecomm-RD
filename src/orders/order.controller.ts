@@ -3,6 +3,7 @@ import {
   Controller,
   Delete,
   Get,
+  Headers,
   Param,
   Post,
   Put,
@@ -27,8 +28,11 @@ export class OrdersController {
   }
 
   @Post()
-  create(@Body() body: CreateOrderDto): Promise<Order> {
-    return this.ordersService.create(body);
+  create(
+    @Body() body: CreateOrderDto,
+    @Headers('Idempotency-Key') idempotencyKey?: string,
+  ): Promise<Order> {
+    return this.ordersService.create(body, idempotencyKey);
   }
 
   @Put(':id')

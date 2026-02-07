@@ -21,7 +21,28 @@ and can be scaled to new domains.
 - Repository: data access, ORM/DB isolation.
 
 
-## Running the App
+## Setup
+1) Copy `.env.example` to `.env` and adjust values.
+2) Start database:
+```
+docker compose up -d
+```
+3) Install dependencies:
+```
+npm i
+```
+4) Run migrations:
+```
+npm run migration:run
+```
+5) Seed data:
+```
+npm run seed
+```
+6) Start API:
+```
+npm run start:dev
+```
 Start in development mode (with file watching):
 ```
 npm run start:dev

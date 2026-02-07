@@ -9,8 +9,8 @@ import {
   PrimaryGeneratedColumn,
   UpdateDateColumn,
 } from 'typeorm';
-import { User } from '../users/user.entity';
-import { OrderItem } from '../order-item.entity';
+import { User } from '../../users/entity/user.entity';
+import { OrderItem } from './order-item.entity';
 
 export enum OrderStatus {
   CREATED = 'CREATED',
@@ -21,6 +21,9 @@ export enum OrderStatus {
 @Entity('orders')
 @Index('IDX_orders_user_id', ['userId'])
 @Index('IDX_orders_created_at', ['createdAt'])
+@Index('IDX_orders_idempotency_key_unique', ['idempotencyKey'], {
+  unique: true,
+})
 export class Order {
   @PrimaryGeneratedColumn('uuid')
   id: string;

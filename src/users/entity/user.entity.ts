@@ -7,7 +7,7 @@ import {
   PrimaryGeneratedColumn,
   UpdateDateColumn,
 } from 'typeorm';
-import { Order } from '../orders/order.entity';
+import { Order } from '../../orders/entity/order.entity';
 
 @Entity('users')
 @Index('IDX_users_email_unique', ['email'], { unique: true })
