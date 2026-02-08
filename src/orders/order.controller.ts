@@ -4,10 +4,13 @@ import {
   Delete,
   Get,
   Headers,
+  HttpStatus,
   Param,
   Post,
   Put,
+  Res,
 } from '@nestjs/common';
+import type { Response } from 'express';
 import { CreateOrderDto } from './dto/create-order.dto';
 import { UpdateOrderDto } from './dto/update-order.dto';
 import { Order } from './entity/order.entity';
@@ -30,9 +33,13 @@ export class OrdersController {
   @Post()
   create(
     @Body() body: CreateOrderDto,
+    @Res({ passthrough: true }) res: Response,
     @Headers('Idempotency-Key') idempotencyKey?: string,
   ): Promise<Order> {
-    return this.ordersService.create(body, idempotencyKey);
+    return this.ordersService.create(body, idempotencyKey).then((result) => {
+      res.status(result.wasDuplicate ? HttpStatus.OK : HttpStatus.CREATED);
+      return result.order;
+    });
   }
 
   @Put(':id')
