@@ -129,7 +129,7 @@ ORDER BY o.created_at DESC;
 npx ts-node homework/SQL-optimise/test.ts
 ```
 
-**Why the optimized version is faster**
+**EXPLAIN ANALYZE**
 - The SQL text is the same, but the database uses an index:
   `idx_orders_status_created_at (status, created_at DESC)`.
 - With the index, Postgres filters by `status` and `created_at` faster and can sort more efficiently.
