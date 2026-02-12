@@ -4,6 +4,8 @@ import { Repository } from 'typeorm';
 import { CreateProductDto } from './dto/create-product.dto';
 import { UpdateProductDto } from './dto/update-product.dto';
 import { Product } from './entity/product.entity';
+import { CreateProductInput } from '../graphql/inputs/create-product.input';
+import { OrdersPaginationInput } from '../graphql/inputs/orders-pagination.input';
 
 @Injectable()
 export class ProductsService {
@@ -17,8 +19,37 @@ export class ProductsService {
     return this.productsRepo.save(product);
   }
 
+  async createFromInput(input: CreateProductInput): Promise<Product> {
+    const dto: CreateProductDto = {
+      name: input.name,
+      sku: input.sku,
+      description: input.description ?? null,
+      price: Number(input.price),
+      stock: input.stock,
+      isActive: input.isActive,
+    };
+    return this.create(dto);
+  }
+
   async getAll(): Promise<Product[]> {
     return this.productsRepo.find();
+  }
+
+  async getAllPaginated(
+    pagination?: OrdersPaginationInput,
+  ): Promise<Product[]> {
+    const qb = this.productsRepo
+      .createQueryBuilder('product')
+      .orderBy('product.created_at', 'DESC');
+
+    if (pagination?.limit !== undefined) {
+      qb.take(pagination.limit);
+    }
+    if (pagination?.offset !== undefined) {
+      qb.skip(pagination.offset);
+    }
+
+    return qb.getMany();
   }
 
   async getProduct(id: Product['id']): Promise<Product> {

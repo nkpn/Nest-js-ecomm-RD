@@ -1,2 +1,0 @@
-## Why I chose Code-First
-I chose **code-first** because I am working alone and want to keep the schema close to the business (code) logic. With the code-first, I define types using decorators in the same files where I implement resolvers, so I avoid duplicating schema definitions and reduce sync errors between `.graphql` and TypeScript code. It is faster for a small project and keeps everything in one place, which matches my current workflow and scope.

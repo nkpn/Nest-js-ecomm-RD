@@ -2,6 +2,7 @@ import {
   BadRequestException,
   ConflictException,
   Injectable,
+  Logger,
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
@@ -12,9 +13,14 @@ import { UpdateOrderDto } from './dto/update-order.dto';
 import { Order } from './entity/order.entity';
 import { OrderItem } from './entity/order-item.entity';
 import { User } from '../users/entity/user.entity';
+import { CreateOrderInput } from '../graphql/inputs/create-order.input';
+import { OrdersFilterInput } from '../graphql/inputs/orders-filter.input';
+import { OrdersPaginationInput } from '../graphql/inputs/orders-pagination.input';
+import { OrdersConnection } from '../graphql/types/orders-connection.type';
 
 @Injectable()
 export class OrdersService {
+  private readonly logger = new Logger(OrdersService.name);
   constructor(
     private readonly dataSource: DataSource,
     @InjectRepository(Order) private readonly ordersRepo: Repository<Order>,
@@ -109,6 +115,96 @@ export class OrdersService {
       throw error;
     } finally {
       await queryRunner.release();
+    }
+  }
+
+  async createFromInput(
+    input: CreateOrderInput,
+    idempotencyKey?: string,
+  ): Promise<Order> {
+    const dto: CreateOrderDto = {
+      userId: input.userId,
+      status: input.status,
+      items: input.items.map((item) => ({
+        productId: item.productId,
+        quantity: item.quantity,
+        priceSnapshot: Number(item.priceSnapshot),
+      })),
+    };
+
+    const result = await this.create(dto, idempotencyKey);
+    return result.order;
+  }
+
+  async getAllConnection(
+    filter?: OrdersFilterInput,
+    pagination?: OrdersPaginationInput,
+  ): Promise<OrdersConnection> {
+    this.validateFilters(filter);
+    this.validatePagination(pagination);
+
+    const qb = this.ordersRepo
+      .createQueryBuilder('order')
+      .leftJoinAndSelect('order.items', 'item')
+      .orderBy('order.createdAt', 'DESC');
+
+    if (filter?.status) {
+      qb.andWhere('order.status = :status', { status: filter.status });
+    }
+    if (filter?.dateFrom) {
+      qb.andWhere('order.createdAt >= :dateFrom', {
+        dateFrom: filter.dateFrom,
+      });
+    }
+    if (filter?.dateTo) {
+      qb.andWhere('order.createdAt <= :dateTo', { dateTo: filter.dateTo });
+    }
+
+    try {
+      const totalCount = await qb.getCount();
+
+      if (pagination?.limit !== undefined) {
+        qb.take(pagination.limit);
+      }
+      if (pagination?.offset !== undefined) {
+        qb.skip(pagination.offset);
+      }
+
+      const nodes = await qb.getMany();
+
+      const limit = pagination?.limit ?? totalCount;
+      const offset = pagination?.offset ?? 0;
+      const hasNextPage = offset + limit < totalCount;
+      const hasPreviousPage = offset > 0;
+
+      return {
+        nodes,
+        totalCount,
+        pageInfo: {
+          hasNextPage,
+          hasPreviousPage,
+        },
+      };
+    } catch (error) {
+      this.logger.error('Failed to fetch orders connection', error as Error);
+      throw new Error('Failed to fetch orders');
+    }
+  }
+
+  private validatePagination(pagination?: OrdersPaginationInput): void {
+    if (!pagination) return;
+    if (pagination.limit !== undefined && pagination.limit <= 0) {
+      throw new BadRequestException('limit must be greater than 0');
+    }
+    if (pagination.offset !== undefined && pagination.offset < 0) {
+      throw new BadRequestException('offset must be 0 or greater');
+    }
+  }
+
+  private validateFilters(filter?: OrdersFilterInput): void {
+    if (!filter) return;
+    if (filter.dateFrom && filter.dateTo && filter.dateFrom > filter.dateTo) {
+      throw new BadRequestException('dateFrom must be <= dateTo');
     }
   }
 

@@ -76,9 +76,7 @@ describe('UsersService', () => {
   it('throws NotFoundException for missing user', async () => {
     jest.spyOn(repo, 'findOne').mockResolvedValue(null);
 
-    await expect(service.getUser('missing')).rejects.toThrow(
-      NotFoundException,
-    );
+    await expect(service.getUser('missing')).rejects.toThrow(NotFoundException);
   });
 
   it('updates user', async () => {
