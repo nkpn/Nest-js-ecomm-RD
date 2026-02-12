@@ -61,7 +61,15 @@ query Orders($filter: OrdersFilterInput, $pagination: OrdersPaginationInput) {
 }
 ```
 
-## GraphQL N+1 (DataLoader)
+## GraphQL N+1 + DataLoader
+**How DataLoader is implemented in this project**
+- `ProductLoader` is implemented in `src/graphql/dataloaders/product.loader.ts`.
+- It batches `productId` values in one GraphQL request and executes a single query:
+  `SELECT ... FROM products WHERE id IN (...)`.
+- It preserves key order (`keys -> results`) by mapping fetched products by `id` and returning values in the same key sequence.
+- `OrderItemResolver` resolves `product` via `productLoader.load(item.productId)`, so resolvers stay thin and reuse per-request cache.
+- `OrdersService.getAllConnection` loads `orders + items` only (without joining `products`), so product fetching is delegated to DataLoader.
+
 **How I verified N+1 before DataLoader**
 - I enabled SQL logging in TypeORM and ran this query:
   `query {
