@@ -27,7 +27,12 @@ export class UsersController {
 
   @Post()
   create(@Body() body: CreateUserDto): Promise<User> {
-    return this.userService.create(body.email);
+    return this.userService.create(
+      body.email,
+      body.password,
+      body.roles,
+      body.scopes,
+    );
   }
 
   @Put(':id')

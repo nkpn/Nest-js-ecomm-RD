@@ -1,4 +1,5 @@
 import { In } from 'typeorm';
+import * as bcrypt from 'bcryptjs';
 import dataSource from '../../data-source';
 import { Order } from '../orders/entity/order.entity';
 import { OrderItem } from '../orders/entity/order-item.entity';
@@ -6,9 +7,24 @@ import { Product } from '../products/entity/product.entity';
 import { User } from '../users/entity/user.entity';
 
 const usersSeed = [
-  { email: 'alice@example.com' },
-  { email: 'bob@example.com' },
-  { email: 'charlie@example.com' },
+  {
+    email: 'alice@example.com',
+    password: 'password123',
+    roles: ['user'],
+    scopes: ['orders:read', 'orders:write', 'files:write'],
+  },
+  {
+    email: 'bob@example.com',
+    password: 'password123',
+    roles: ['support'],
+    scopes: ['orders:read'],
+  },
+  {
+    email: 'charlie@example.com',
+    password: 'password123',
+    roles: ['admin'],
+    scopes: ['orders:read', 'orders:write', 'products:images:assign:any'],
+  },
 ];
 
 const productNames = [
@@ -108,7 +124,16 @@ async function seed(): Promise<void> {
     const ordersRepository = dataSource.getRepository(Order);
     const orderItemsRepository = dataSource.getRepository(OrderItem);
 
-    await usersRepository.upsert(usersSeed, ['email']);
+    const usersWithHash = await Promise.all(
+      usersSeed.map(async (user) => ({
+        email: user.email,
+        passwordHash: await bcrypt.hash(user.password, 10),
+        roles: user.roles,
+        scopes: user.scopes,
+      })),
+    );
+
+    await usersRepository.upsert(usersWithHash, ['email']);
     await productsRepository.upsert(productsSeed, ['sku']);
 
     const users = await usersRepository.find({

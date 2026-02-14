@@ -22,6 +22,31 @@ export class User {
   @Column({ type: 'varchar', length: 320 })
   email: string;
 
+  @Column({
+    type: 'varchar',
+    length: 255,
+    name: 'password_hash',
+    nullable: true,
+    select: false,
+  })
+  passwordHash?: string | null;
+
+  @Field(() => [String])
+  @Column({
+    type: 'text',
+    array: true,
+    default: () => 'ARRAY[]::text[]',
+  })
+  roles: string[];
+
+  @Field(() => [String])
+  @Column({
+    type: 'text',
+    array: true,
+    default: () => 'ARRAY[]::text[]',
+  })
+  scopes: string[];
+
   @Field(() => [Order])
   @OneToMany(() => Order, (order) => order.user)
   orders: Order[];
