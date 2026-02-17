@@ -3,44 +3,44 @@ import {
   CreateDateColumn,
   Entity,
   Index,
-  JoinColumn,
-  ManyToOne,
   PrimaryGeneratedColumn,
   UpdateDateColumn
 } from 'typeorm';
-import { User } from '../users/entity/user.entity';
 
 export enum FileStatus {
   PENDING = 'pending',
   READY = 'ready'
 }
 
+export enum FileVisibility {
+  PRIVATE = 'private',
+  PUBLIC = 'public'
+}
+
 @Entity('files')
-@Index('IDX_files_owner_user_id', ['ownerUserId'])
+@Index('IDX_files_owner_id', ['ownerId'])
+@Index('IDX_files_entity_id', ['entityId'])
 @Index('IDX_files_status', ['status'])
-@Index('UQ_files_object_key', ['objectKey'], { unique: true })
+@Index('IDX_files_visibility', ['visibility'])
+@Index('UQ_files_key', ['key'], { unique: true })
 export class FileRecord {
   @PrimaryGeneratedColumn('uuid')
   id: string;
 
-  @Column({ type: 'uuid', name: 'owner_user_id' })
-  ownerUserId: string;
+  @Column({ type: 'uuid', name: 'owner_id' })
+  ownerId: string;
 
-  @ManyToOne(() => User, { onDelete: 'CASCADE' })
-  @JoinColumn({ name: 'owner_user_id' })
-  ownerUser: User;
+  @Column({ type: 'uuid', name: 'entity_id', nullable: true })
+  entityId: string | null;
 
-  @Column({ type: 'varchar', length: 512, name: 'object_key' })
-  objectKey: string;
-
-  @Column({ type: 'varchar', length: 120 })
-  bucket: string;
+  @Column({ type: 'varchar', length: 512, name: 'key' })
+  key: string;
 
   @Column({ type: 'varchar', length: 120, name: 'content_type' })
   contentType: string;
 
-  @Column({ type: 'integer', name: 'size_bytes' })
-  sizeBytes: number;
+  @Column({ type: 'integer', name: 'size' })
+  size: number;
 
   @Column({
     type: 'enum',
@@ -49,8 +49,12 @@ export class FileRecord {
   })
   status: FileStatus;
 
-  @Column({ type: 'timestamptz', name: 'completed_at', nullable: true })
-  completedAt: Date | null;
+  @Column({
+    type: 'enum',
+    enum: FileVisibility,
+    default: FileVisibility.PRIVATE
+  })
+  visibility: FileVisibility;
 
   @CreateDateColumn({ type: 'timestamptz', name: 'created_at' })
   createdAt: Date;
