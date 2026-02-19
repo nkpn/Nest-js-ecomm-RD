@@ -13,6 +13,7 @@ import { Order } from '../../orders/entity/order.entity';
 @ObjectType()
 @Entity('users')
 @Index('IDX_users_email_unique', ['email'], { unique: true })
+@Index('IDX_users_avatar_file_id', ['avatarFileId'])
 export class User {
   @Field(() => ID)
   @PrimaryGeneratedColumn('uuid')
@@ -46,6 +47,10 @@ export class User {
     default: () => 'ARRAY[]::text[]',
   })
   scopes: string[];
+
+  @Field(() => ID, { nullable: true })
+  @Column({ type: 'uuid', name: 'avatar_file_id', nullable: true })
+  avatarFileId: string | null;
 
   @Field(() => [Order])
   @OneToMany(() => Order, (order) => order.user)

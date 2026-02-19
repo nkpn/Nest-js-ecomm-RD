@@ -27,7 +27,8 @@ export class S3Service {
     this.region = this.configService.get<string>('AWS_REGION') ?? 'eu-central-1';
     this.bucket = this.configService.getOrThrow<string>('AWS_S3_BUCKET');
     this.cloudfrontBaseUrl = this.trimTrailingSlash(
-      this.configService.get<string>('AWS_CLOUDFRONT_URL'),
+      this.configService.get<string>('CLOUDFRONT_BASE_URL') ??
+        this.configService.get<string>('AWS_CLOUDFRONT_URL'),
     );
     this.defaultExpiresInSec = Number(
       this.configService.get<string>('FILES_PRESIGN_EXPIRES_IN_SEC') ?? 900,

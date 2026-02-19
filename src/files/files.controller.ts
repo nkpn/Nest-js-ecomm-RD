@@ -24,7 +24,7 @@ export class FilesController {
     @Req() req: Request & { user?: AuthUser },
     @Body() body: CompleteUploadDto
   ) {
-    return this.filesService.completeUpload(body.fileId, req.user as AuthUser);
+    return this.filesService.completeUpload(body, req.user as AuthUser);
   }
 
   @Get(':id')

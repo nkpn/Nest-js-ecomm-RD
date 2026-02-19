@@ -1,4 +1,4 @@
-import { IsIn, IsInt, IsString, Min } from 'class-validator';
+import { IsIn, IsInt, IsOptional, IsString, IsUUID, Min } from 'class-validator';
 
 export class PresignFileDto {
   @IsString()
@@ -12,4 +12,8 @@ export class PresignFileDto {
   @IsString()
   @IsIn(['avatar', 'product-image'])
   kind: 'avatar' | 'product-image';
+
+  @IsOptional()
+  @IsUUID()
+  productId?: string;
 }

@@ -8,6 +8,9 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { randomUUID } from 'node:crypto';
 import { Repository } from 'typeorm';
 import { AuthUser } from '../auth/types';
+import { Product } from '../products/entity/product.entity';
+import { User } from '../users/entity/user.entity';
+import { CompleteUploadDto } from './dto/complete-upload.dto';
 import { FileRecord, FileStatus, FileVisibility } from './file-record.entity';
 import { PresignFileDto } from './dto/presign-file.dto';
 import { S3Service } from './s3.service';
@@ -30,17 +33,27 @@ export class FilesService {
   constructor(
     @InjectRepository(FileRecord)
     private readonly filesRepository: Repository<FileRecord>,
+    @InjectRepository(Product)
+    private readonly productsRepository: Repository<Product>,
+    @InjectRepository(User)
+    private readonly usersRepository: Repository<User>,
     private readonly s3Service: S3Service,
   ) {}
 
   async createPresignedUpload(user: AuthUser, dto: PresignFileDto) {
-    this.validateUploadInput(dto);
+    this.assertCanPresign(user, dto.kind);
+    await this.validateUploadInput(dto);
 
-    const key = this.buildObjectKey(dto.kind, user.sub, dto.contentType);
+    const key = this.buildObjectKey(
+      dto.kind,
+      user.sub,
+      dto.contentType,
+      dto.productId,
+    );
 
     const file = this.filesRepository.create({
       ownerId: user.sub,
-      entityId: null,
+      entityId: dto.kind === 'product-image' ? dto.productId! : null,
       key,
       contentType: dto.contentType,
       size: dto.sizeBytes,
@@ -57,37 +70,29 @@ export class FilesService {
 
     return {
       fileId: saved.id,
-      status: saved.status,
       key: saved.key,
-      ownerId: saved.ownerId,
-      entityId: saved.entityId,
-      visibility: saved.visibility,
       uploadUrl: presigned.uploadUrl,
-      uploadMethod: 'PUT',
-      uploadHeaders: {
-        'Content-Type': saved.contentType,
-      },
-      expiresInSec: presigned.expiresInSec,
+      contentType: saved.contentType,
       publicUrl: this.s3Service.buildPublicUrl(saved.key),
+      uploadMethod: 'PUT',
+      expiresInSec: presigned.expiresInSec,
     };
   }
 
-  async completeUpload(fileId: string, user: AuthUser) {
-    const file = await this.findByIdOrThrow(fileId);
-    this.assertOwnerOrStaff(file, user);
+  async completeUpload(dto: CompleteUploadDto, user: AuthUser) {
+    const file = await this.findByIdOrThrow(dto.fileId);
+    this.assertOwner(file, user);
 
-    if (file.status === FileStatus.READY) {
-      return this.toPublicView(file);
+    if (file.status === FileStatus.PENDING) {
+      const exists = await this.s3Service.objectExists(file.key);
+      if (!exists) {
+        throw new BadRequestException('File object is missing in storage');
+      }
+      file.status = FileStatus.READY;
     }
 
-    const exists = await this.s3Service.objectExists(file.key);
-    if (!exists) {
-      throw new BadRequestException('File object is missing in storage');
-    }
-
-    file.status = FileStatus.READY;
+    await this.attachFileToDomain(dto, file, user);
     const saved = await this.filesRepository.save(file);
-
     return this.toPublicView(saved);
   }
 
@@ -154,7 +159,7 @@ export class FilesService {
     return file;
   }
 
-  private validateUploadInput(dto: PresignFileDto): void {
+  private async validateUploadInput(dto: PresignFileDto): Promise<void> {
     if (!ALLOWED_CONTENT_TYPES.includes(dto.contentType as any)) {
       throw new BadRequestException(
         `Unsupported contentType. Allowed: ${ALLOWED_CONTENT_TYPES.join(', ')}`,
@@ -174,6 +179,26 @@ export class FilesService {
     if (dto.kind !== 'avatar' && dto.kind !== 'product-image') {
       throw new BadRequestException('Unsupported kind');
     }
+
+    if (dto.kind === 'avatar' && dto.productId) {
+      throw new BadRequestException('productId is not allowed for avatar uploads');
+    }
+
+    if (dto.kind === 'product-image') {
+      if (!dto.productId) {
+        throw new BadRequestException(
+          'productId is required for product-image uploads',
+        );
+      }
+
+      const productExists = await this.productsRepository.exist({
+        where: { id: dto.productId },
+      });
+
+      if (!productExists) {
+        throw new NotFoundException('Product not found');
+      }
+    }
   }
 
   private assertOwnerOrStaff(file: FileRecord, user: AuthUser): void {
@@ -186,13 +211,111 @@ export class FilesService {
     }
   }
 
+  private assertOwner(file: FileRecord, user: AuthUser): void {
+    if (file.ownerId !== user.sub) {
+      throw new ForbiddenException('File does not belong to current user');
+    }
+  }
+
+  private assertCanPresign(
+    user: AuthUser,
+    kind: PresignFileDto['kind'],
+  ): void {
+    const allowedRoles = ['user', 'support', 'admin'];
+    const hasAllowedRole = user.roles.some((role) => allowedRoles.includes(role));
+    if (!hasAllowedRole) {
+      throw new ForbiddenException('Role is not allowed to upload files');
+    }
+
+    if (user.roles.includes('admin')) {
+      return;
+    }
+
+    const hasRequiredScope =
+      user.scopes.includes('files:write') ||
+      (kind === 'product-image' && user.scopes.includes('products:images:write'));
+
+    if (!hasRequiredScope) {
+      throw new ForbiddenException('Insufficient scope for file upload');
+    }
+  }
+
   private buildObjectKey(
     kind: string,
     userId: string,
     contentType: string,
+    productId?: string,
   ): string {
     const ext = EXTENSION_BY_TYPE[contentType] ?? 'bin';
-    return `${kind}/${userId}/${Date.now()}-${randomUUID()}.${ext}`;
+    const fileId = randomUUID();
+
+    if (kind === 'avatar') {
+      return `users/${userId}/avatars/${fileId}.${ext}`;
+    }
+
+    if (!productId) {
+      throw new BadRequestException(
+        'productId is required for product-image uploads',
+      );
+    }
+
+    return `products/${productId}/images/${fileId}.${ext}`;
+  }
+
+  private async attachFileToDomain(
+    dto: CompleteUploadDto,
+    file: FileRecord,
+    user: AuthUser,
+  ): Promise<void> {
+    if (dto.bindTo === 'avatar') {
+      this.assertAvatarKeyBelongsToOwner(file.key, user.sub);
+      file.entityId = user.sub;
+
+      const result = await this.usersRepository.update(
+        { id: user.sub },
+        { avatarFileId: file.id },
+      );
+
+      if (!result.affected) {
+        throw new NotFoundException('User not found');
+      }
+
+      return;
+    }
+
+    if (!dto.productId) {
+      throw new BadRequestException(
+        'productId is required for product-image binding',
+      );
+    }
+
+    this.assertProductKeyMatchesTarget(file.key, dto.productId);
+    file.entityId = dto.productId;
+
+    const result = await this.productsRepository.update(
+      { id: dto.productId },
+      { imageFileId: file.id },
+    );
+
+    if (!result.affected) {
+      throw new NotFoundException('Product not found');
+    }
+  }
+
+  private assertAvatarKeyBelongsToOwner(key: string, userId: string): void {
+    const expectedPrefix = `users/${userId}/avatars/`;
+    if (!key.startsWith(expectedPrefix)) {
+      throw new BadRequestException('File key does not match avatar binding');
+    }
+  }
+
+  private assertProductKeyMatchesTarget(key: string, productId: string): void {
+    const expectedPrefix = `products/${productId}/images/`;
+    if (!key.startsWith(expectedPrefix)) {
+      throw new BadRequestException(
+        'File key does not match product-image binding',
+      );
+    }
   }
 
   private toPublicView(file: FileRecord) {

@@ -7,6 +7,7 @@ import { OrdersModule } from './orders/order.module';
 import { ProductsModule } from './products/product.module';
 import { UserModule } from './users/user.module';
 import { AuthModule } from './auth/auth.module';
+import { FilesModule } from './files/files.module';
 import { OrdersResolver } from './graphql/orders.resolver';
 import { ProductsResolver } from './graphql/products.resolver';
 import { OrderItemResolver } from './graphql/order-item.resolver';
@@ -18,6 +19,7 @@ import { ProductLoader } from './graphql/dataloaders/product.loader';
     ProductsModule,
     UserModule,
     AuthModule,
+    FilesModule,
     GraphQLModule.forRoot<ApolloDriverConfig>({
       driver: ApolloDriver,
       autoSchemaFile: true,

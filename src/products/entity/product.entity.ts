@@ -14,6 +14,7 @@ import { OrderItem } from '../../orders/entity/order-item.entity';
 @Entity('products')
 @Index('IDX_products_sku_unique', ['sku'], { unique: true })
 @Index('IDX_products_created_at', ['createdAt'])
+@Index('IDX_products_image_file_id', ['imageFileId'])
 export class Product {
   @Field(() => ID)
   @PrimaryGeneratedColumn('uuid')
@@ -42,6 +43,10 @@ export class Product {
   @Field()
   @Column({ type: 'boolean', name: 'is_active', default: true })
   isActive: boolean;
+
+  @Field(() => ID, { nullable: true })
+  @Column({ type: 'uuid', name: 'image_file_id', nullable: true })
+  imageFileId: string | null;
 
   @Field()
   @CreateDateColumn({ type: 'timestamptz', name: 'created_at' })
