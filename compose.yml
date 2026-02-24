@@ -1,0 +1,112 @@
+services:
+  api:
+    # Prod-like app runtime: distroless image, no shell inside container.
+    build:
+      context: .
+      target: prod-distroless
+    restart: unless-stopped
+    # Wait for DB readiness before starting API process.
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      PORT: 3000
+      NODE_ENV: production
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_USER: ${DB_USER:-postgres}
+      DB_PASS: ${DB_PASS:-postgres}
+      DB_NAME: ${DB_NAME:-lecture5}
+      JWT_SECRET: ${JWT_SECRET:-change_me_super_secret}
+      JWT_EXPIRES_IN: ${JWT_EXPIRES_IN:-15m}
+      AWS_REGION: ${AWS_REGION:-eu-central-1}
+      AWS_S3_BUCKET: ${AWS_S3_BUCKET:-lesson9-files-private}
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-}
+    ports:
+      # Host:Container mapping => API is available on localhost:8080
+      - '8080:3000'
+    networks:
+      # internal: DB access, public: external inbound traffic to API.
+      - internal
+      - public
+
+  # PostgreSQL database. Intentionally has no published ports to host.
+  postgres:
+    image: postgres:16
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${DB_USER:-postgres}
+      POSTGRES_PASSWORD: ${DB_PASS:-postgres}
+      POSTGRES_DB: ${DB_NAME:-lecture5}
+    volumes:
+      # Persistent DB storage.
+      - pgdata:/var/lib/postgresql/data
+    networks:
+      # DB lives only in private network.
+      - internal
+    healthcheck:
+      # Marks DB as healthy when ready to accept connections.
+      test: ['CMD-SHELL', 'pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB']
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  # One-off operational job: run migrations, then container exits.
+  migrate:
+    # Profile keeps this service out of regular `up -d` startup.
+    profiles: ['jobs']
+    build:
+      context: .
+      target: jobs
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_USER: ${DB_USER:-postgres}
+      DB_PASS: ${DB_PASS:-postgres}
+      DB_NAME: ${DB_NAME:-lecture5}
+      NODE_ENV: development
+    command: ['npm', 'run', 'migration:run']
+    # Do not restart completed/failed one-off jobs automatically.
+    restart: 'no'
+    networks:
+      - internal
+
+  # One-off operational job: seed data, then container exits.
+  seed:
+    # Profile keeps this service out of regular `up -d` startup.
+    profiles: ['jobs']
+    build:
+      context: .
+      target: jobs
+    depends_on:
+      postgres:
+        condition: service_healthy
+      # Seed is allowed only after successful migrations.
+      migrate:
+        condition: service_completed_successfully
+    environment:
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_USER: ${DB_USER:-postgres}
+      DB_PASS: ${DB_PASS:-postgres}
+      DB_NAME: ${DB_NAME:-lecture5}
+      NODE_ENV: development
+    command: ['npm', 'run', 'seed']
+    restart: 'no'
+    networks:
+      - internal
+
+volumes:
+  # Named volume for PostgreSQL data persistence.
+  pgdata:
+
+networks:
+  internal:
+    # Private network: no direct external reachability.
+    internal: true
+  # Public network for services that expose ports (api).
+  public:

@@ -1,0 +1,18 @@
+# Dependencies and build artifacts
+node_modules
+dist
+coverage
+
+# VCS and local metadata
+.git
+.gitignore
+.DS_Store
+
+# Environment and local overrides
+.env
+.env.*
+!.env.example
+
+# Docs and local notes are not needed in runtime images
+doc
+homework

@@ -1,0 +1,33 @@
+services:
+  api:
+    build:
+      context: .
+      target: dev
+    command:
+      - /bin/sh
+      - -c
+      - |
+        if [ ! -x node_modules/.bin/nest ]; then
+          echo "Installing dependencies into /app/node_modules volume..."
+          npm ci
+        fi
+        npm run start:dev
+    environment:
+      NODE_ENV: development
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_USER: ${DB_USER:-postgres}
+      DB_PASS: ${DB_PASS:-postgres}
+      DB_NAME: ${DB_NAME:-lecture5}
+      JWT_SECRET: ${JWT_SECRET:-change_me_super_secret}
+      JWT_EXPIRES_IN: ${JWT_EXPIRES_IN:-15m}
+      AWS_REGION: ${AWS_REGION:-eu-central-1}
+      AWS_S3_BUCKET: ${AWS_S3_BUCKET:-lesson9-files-private}
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-}
+      CHOKIDAR_USEPOLLING: 'true'
+    volumes:
+      # Source bind-mount for hot reload.
+      - ./:/app
+      # Keep container node_modules separate so bind-mount never overwrites deps.
+      - /app/node_modules

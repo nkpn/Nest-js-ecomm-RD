@@ -54,6 +54,74 @@ npm run build
 npm run start:prod
 ```
 
+## 6. Docker / Compose Guide
+
+### 6.1 Run Commands
+Development (hot reload + bind mount):
+```bash
+docker compose -f compose.yml -f compose.dev.yml up --build
+```
+
+Production-like local run:
+```bash
+docker compose -f compose.yml up --build
+```
+
+Migrations / seed as one-off jobs:
+```bash
+docker compose run --rm migrate
+docker compose run --rm seed
+```
+
+If your repository contains both `compose.yml` and `docker-compose.yml`, use explicit file selection for jobs:
+```bash
+docker compose -f compose.yml run --rm migrate
+docker compose -f compose.yml run --rm seed
+```
+
+API endpoint:
+```bash
+http://localhost:8080
+```
+
+### 6.2 Optimization Evidence
+Compare image sizes:
+```bash
+docker build --target dev -t e-tech:dev .
+docker build --target prod -t e-tech:prod .
+docker build --target prod-distroless -t e-tech:prod-distroless .
+docker image ls | grep 'e-tech'
+```
+
+Inspect image layers:
+```bash
+docker history e-tech:dev
+docker history e-tech:prod
+docker history e-tech:prod-distroless
+```
+
+Short conclusion:
+- `prod-distroless` is usually smaller than `dev` and often smaller/similar to `prod`.
+- `prod-distroless` is safer because it has no package manager/shell and uses non-root base (`nonroot`).
+
+### 6.3 Non-root Verification
+For `prod` image:
+```bash
+docker run --rm --entrypoint id e-tech:prod -u
+```
+Expected: non-zero/non-root UID (not `0`).
+
+For `prod-distroless` image:
+```bash
+docker run --rm --entrypoint /nodejs/bin/node e-tech:prod-distroless -e "console.log(process.getuid())"
+```
+Expected: `65532` (`nonroot` user in distroless image).
+
+Why this guarantees non-root in distroless:
+- base image is `gcr.io/distroless/nodejs22-debian12:nonroot`;
+- runtime has no shell and runs as non-root by design.
+
+
 ## Modules
 - Users (`/users`)
 - Orders (`/orders`)
@@ -68,16 +136,3 @@ Routes:
 - GET /users
 - POST /users
 
-## Environment Configuration
-The app reads environment variables from:
-- `.env.dev` for development
-- `.env.prod` for production
-
-Example variable:
-```
-TEST_ID=abc123
-```
-
-
-## Viewing TEST_ID
-To see `TEST_ID` in the response, make sure it exists in the active env file and then call the root endpoint (localhost:3000)
