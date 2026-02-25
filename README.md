@@ -121,6 +121,36 @@ Why this guarantees non-root in distroless:
 - base image is `gcr.io/distroless/nodejs22-debian12:nonroot`;
 - runtime has no shell and runs as non-root by design.
 
+### 6.4 Docker Scout Security Scan
+Build image for scanning:
+```bash
+docker build --target prod-distroless -t e-tech:prod-distroless .
+```
+
+Quick security overview (total CVE counters and detected base image):
+```bash
+docker scout quickview local://e-tech:prod-distroless
+```
+
+Fail check when `CRITICAL`/`HIGH` vulnerabilities are present:
+```bash
+docker scout cves --only-severity critical,high --exit-code local://e-tech:prod-distroless
+```
+
+Show only vulnerabilities inherited from base image:
+```bash
+docker scout cves --only-base local://e-tech:prod-distroless
+```
+
+Get remediation suggestions for base image updates:
+```bash
+docker scout recommendations local://e-tech:prod-distroless
+```
+
+Evaluate Docker Scout policies and fail on policy violations:
+```bash
+docker scout policy --exit-code local://e-tech:prod-distroless
+```
 
 ## Modules
 - Users (`/users`)
@@ -135,4 +165,3 @@ User module provides endpoints for creating a user and get all users.
 Routes:
 - GET /users
 - POST /users
-
