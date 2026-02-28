@@ -156,6 +156,62 @@ docker scout policy --exit-code local://e-tech:prod-distroless
 - Users (`/users`)
 - Orders (`/orders`)
 
+## Realtime Orders Status
+
+Project now includes a Socket.IO gateway for realtime order status updates.
+
+Connection endpoint:
+```bash
+ws://localhost:3000/realtime
+```
+
+Authentication:
+- client must pass JWT token in `auth.token`
+- `Authorization: Bearer <token>` in handshake also works
+- `?token=<jwt>` query param also works
+
+Subscription flow:
+1. Client connects to namespace `/realtime`
+2. Client sends `subscribeOrder` with payload `{ "orderId": "<order-id>" }`
+3. Server checks JWT and verifies that user is allowed to see this order
+4. When order status changes, server emits `order.status` to room `order:<orderId>`
+
+Supported socket events:
+```ts
+socket.emit('subscribeOrder', { orderId: '...' });
+socket.emit('unsubscribeOrder', { orderId: '...' });
+
+socket.on('order.status', (event) => {
+  console.log(event);
+});
+```
+
+Example event payload:
+```json
+{
+  "orderId": "9f2d0d7d-5f86-4e4a-a6cb-3d7f79bbf88e",
+  "status": "PAID",
+  "version": 1740752000000,
+  "ts": 1740752000123
+}
+```
+
+How to trigger an event in this project:
+1. Create or find an order
+2. Connect to `/realtime` with a JWT of the order owner or staff user
+3. Send `subscribeOrder`
+4. Update order status through `PUT /orders/:id`
+5. Client receives `order.status`
+
+Quick CLI check:
+```bash
+npm run ws:check -- --token=<JWT> --orderId=<ORDER_ID>
+```
+
+Optional params:
+- `--url=http://localhost:3000/realtime`
+- `--timeoutMs=30000`
+
 ### Relationships (Many-to-One)
 - `Order` → `User` (many to one )
 - `OrderItem` → `Order` (many to one)

@@ -7,9 +7,13 @@ services:
       - /bin/sh
       - -c
       - |
-        if [ ! -x node_modules/.bin/nest ]; then
+        LOCKFILE_HASH_FILE=node_modules/.package-lock.hash
+        CURRENT_LOCKFILE_HASH=$$(sha256sum package-lock.json | awk '{print $$1}')
+
+        if [ ! -x node_modules/.bin/nest ] || [ ! -f "$$LOCKFILE_HASH_FILE" ] || [ "$$(cat "$$LOCKFILE_HASH_FILE")" != "$$CURRENT_LOCKFILE_HASH" ]; then
           echo "Installing dependencies into /app/node_modules volume..."
           npm ci
+          echo "$$CURRENT_LOCKFILE_HASH" > "$$LOCKFILE_HASH_FILE"
         fi
         npm run start:dev
     environment:

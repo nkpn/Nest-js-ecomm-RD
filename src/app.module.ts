@@ -12,6 +12,7 @@ import { OrdersResolver } from './graphql/orders.resolver';
 import { ProductsResolver } from './graphql/products.resolver';
 import { OrderItemResolver } from './graphql/order-item.resolver';
 import { ProductLoader } from './graphql/dataloaders/product.loader';
+import { RealtimeModule } from './realtime/realtime.module';
 
 @Module({
   imports: [
@@ -20,6 +21,7 @@ import { ProductLoader } from './graphql/dataloaders/product.loader';
     UserModule,
     AuthModule,
     FilesModule,
+    RealtimeModule,
     GraphQLModule.forRoot<ApolloDriverConfig>({
       driver: ApolloDriver,
       autoSchemaFile: true,

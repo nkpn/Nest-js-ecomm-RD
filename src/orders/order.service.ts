@@ -1,12 +1,14 @@
 import {
   BadRequestException,
   ConflictException,
+  ForbiddenException,
   Injectable,
   Logger,
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { DataSource, Repository } from 'typeorm';
+import { AuthUser } from '../auth/types';
 import { Product } from '../products/entity/product.entity';
 import { CreateOrderDto } from './dto/create-order.dto';
 import { UpdateOrderDto } from './dto/update-order.dto';
@@ -17,15 +19,18 @@ import { CreateOrderInput } from '../graphql/inputs/create-order.input';
 import { OrdersFilterInput } from '../graphql/inputs/orders-filter.input';
 import { OrdersPaginationInput } from '../graphql/inputs/orders-pagination.input';
 import { OrdersConnection } from '../graphql/types/orders-connection.type';
+import { OrdersEventsService } from './orders-events.service';
 
 @Injectable()
 export class OrdersService {
   private readonly logger = new Logger(OrdersService.name);
+
   constructor(
     private readonly dataSource: DataSource,
     @InjectRepository(Order) private readonly ordersRepo: Repository<Order>,
     @InjectRepository(User)
     private readonly usersRepo: Repository<User>,
+    private readonly ordersEvents: OrdersEventsService,
   ) {}
 
   async create(
@@ -224,11 +229,26 @@ export class OrdersService {
   }
 
   async updateOrder(id: Order['id'], updates: UpdateOrderDto): Promise<Order> {
-    const order = await this.ordersRepo.preload({ id, ...updates });
+    const order = await this.ordersRepo.findOne({ where: { id } });
     if (!order) {
       throw new NotFoundException('Order not found');
     }
-    return this.ordersRepo.save(order);
+
+    const previousStatus = order.status;
+    Object.assign(order, updates);
+
+    const savedOrder = await this.ordersRepo.save(order);
+
+    if (updates.status && updates.status !== previousStatus) {
+      this.ordersEvents.publishStatusChanged({
+        orderId: savedOrder.id,
+        status: savedOrder.status,
+        version: savedOrder.updatedAt?.getTime() ?? Date.now(),
+        ts: Date.now(),
+      });
+    }
+
+    return savedOrder;
   }
 
   async deleteOrder(id: Order['id']): Promise<void> {
@@ -245,5 +265,28 @@ export class OrdersService {
       'code' in error &&
       (error as { code?: string }).code === '23505'
     );
+  }
+
+  async canSubscribeToOrder(orderId: string, user: AuthUser): Promise<void> {
+    const order = await this.ordersRepo.findOne({ where: { id: orderId } });
+    if (!order) {
+      throw new NotFoundException('Order not found');
+    }
+
+    this.assertCanAccessOrder(order, user);
+  }
+
+  private assertCanAccessOrder(order: Order, user: AuthUser): void {
+    if (this.isStaff(user.roles)) {
+      return;
+    }
+
+    if (order.userId !== user.sub) {
+      throw new ForbiddenException('Access denied');
+    }
+  }
+
+  private isStaff(roles: string[]): boolean {
+    return roles.includes('admin') || roles.includes('operator') || roles.includes('support');
   }
 }

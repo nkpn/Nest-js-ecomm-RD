@@ -7,12 +7,14 @@
   "license": "UNLICENSED",
   "scripts": {
     "build": "nest build",
+    "docker:dev": "docker compose -f compose.yml -f compose.dev.yml up --build",
     "format": "prettier --write \"src/**/*.ts\" \"test/**/*.ts\"",
     "start": "nest start",
     "start:dev": "NODE_ENV=dev nest start --watch",
     "start:debug": "nest start --debug --watch",
     "start:prod": "NODE_ENV=prod nest start",
     "seed": "ts-node src/seeds/seed.ts",
+    "ws:check": "ts-node scripts/ws-check.ts",
     "migration:generate": "typeorm-ts-node-commonjs -d data-source.ts migration:generate",
     "migration:run": "typeorm-ts-node-commonjs -d data-source.ts migration:run",
     "migration:revert": "typeorm-ts-node-commonjs -d data-source.ts migration:revert",
@@ -36,7 +38,9 @@
     "@nestjs/jwt": "^11.0.2",
     "@nestjs/passport": "^11.0.5",
     "@nestjs/platform-express": "^11.0.1",
+    "@nestjs/platform-socket.io": "^11.1.14",
     "@nestjs/typeorm": "^11.0.0",
+    "@nestjs/websockets": "^11.1.14",
     "bcryptjs": "^3.0.3",
     "class-transformer": "^0.5.1",
     "class-validator": "^0.14.3",
@@ -48,6 +52,8 @@
     "pg": "^8.18.0",
     "reflect-metadata": "^0.2.2",
     "rxjs": "^7.8.1",
+    "socket.io": "^4.8.3",
+    "socket.io-client": "^4.8.3",
     "typeorm": "^0.3.28"
   },
   "devDependencies": {
