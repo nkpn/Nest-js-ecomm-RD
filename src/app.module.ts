@@ -3,6 +3,7 @@ import { ConfigModule, ConfigService } from '@nestjs/config';
 import { ApolloDriver, ApolloDriverConfig } from '@nestjs/apollo';
 import { GraphQLModule } from '@nestjs/graphql';
 import { TypeOrmModule } from '@nestjs/typeorm';
+import { RabbitmqModule } from './rabbitmq/rabbitmq.module';
 import { OrdersModule } from './orders/order.module';
 import { ProductsModule } from './products/product.module';
 import { UserModule } from './users/user.module';
@@ -13,15 +14,22 @@ import { ProductsResolver } from './graphql/products.resolver';
 import { OrderItemResolver } from './graphql/order-item.resolver';
 import { ProductLoader } from './graphql/dataloaders/product.loader';
 import { RealtimeModule } from './realtime/realtime.module';
+import { OrdersWorkerModule } from './orders-worker/orders-worker.module';
 
 @Module({
   imports: [
+    ConfigModule.forRoot({
+      isGlobal: true,
+      envFilePath: [`.env.${process.env.NODE_ENV || 'dev'}`, '.env'],
+    }),
+    RabbitmqModule,
     OrdersModule,
     ProductsModule,
     UserModule,
     AuthModule,
     FilesModule,
     RealtimeModule,
+    OrdersWorkerModule,
     GraphQLModule.forRoot<ApolloDriverConfig>({
       driver: ApolloDriver,
       autoSchemaFile: true,
@@ -29,10 +37,6 @@ import { RealtimeModule } from './realtime/realtime.module';
       playground: true,
       debug: false,
       includeStacktraceInErrorResponses: false,
-    }),
-    ConfigModule.forRoot({
-      isGlobal: true,
-      envFilePath: [`.env.${process.env.NODE_ENV || 'dev'}`, '.env'],
     }),
     TypeOrmModule.forRootAsync({
       inject: [ConfigService],

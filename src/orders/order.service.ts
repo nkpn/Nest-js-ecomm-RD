@@ -6,13 +6,14 @@ import {
   Logger,
   NotFoundException,
 } from '@nestjs/common';
+import { randomUUID } from 'node:crypto';
 import { InjectRepository } from '@nestjs/typeorm';
 import { DataSource, Repository } from 'typeorm';
 import { AuthUser } from '../auth/types';
 import { Product } from '../products/entity/product.entity';
 import { CreateOrderDto } from './dto/create-order.dto';
 import { UpdateOrderDto } from './dto/update-order.dto';
-import { Order } from './entity/order.entity';
+import { Order, OrderStatus } from './entity/order.entity';
 import { OrderItem } from './entity/order-item.entity';
 import { User } from '../users/entity/user.entity';
 import { CreateOrderInput } from '../graphql/inputs/create-order.input';
@@ -20,6 +21,9 @@ import { OrdersFilterInput } from '../graphql/inputs/orders-filter.input';
 import { OrdersPaginationInput } from '../graphql/inputs/orders-pagination.input';
 import { OrdersConnection } from '../graphql/types/orders-connection.type';
 import { OrdersEventsService } from './orders-events.service';
+import { RabbitmqService } from '../rabbitmq/rabbitmq.service';
+import { OrderProcessMessage } from './order-process-message.type';
+import { ProcessedMessage } from '../idempotency/processed-message.entity';
 
 @Injectable()
 export class OrdersService {
@@ -31,6 +35,7 @@ export class OrdersService {
     @InjectRepository(User)
     private readonly usersRepo: Repository<User>,
     private readonly ordersEvents: OrdersEventsService,
+    private readonly rabbitmqService: RabbitmqService,
   ) {}
 
   async create(
@@ -64,11 +69,13 @@ export class OrdersService {
     const queryRunner = this.dataSource.createQueryRunner();
     await queryRunner.connect();
     await queryRunner.startTransaction();
+    let createdOrder: Order | null = null;
+    let transactionCommitted = false;
 
     try {
       const order = queryRunner.manager.create(Order, {
         userId: dto.userId,
-        status: dto.status,
+        status: OrderStatus.PENDING,
         idempotencyKey: key,
       });
       const savedOrder = await queryRunner.manager.save(Order, order);
@@ -104,10 +111,20 @@ export class OrdersService {
 
       savedOrder.items = savedItems;
 
+      createdOrder = await queryRunner.manager.findOne(Order, {
+        where: { id: savedOrder.id },
+        relations: ['items'],
+      });
+      if (!createdOrder) {
+        throw new NotFoundException('Order not found after creation');
+      }
+
       await queryRunner.commitTransaction();
-      return { order: savedOrder, wasDuplicate: false };
+      transactionCommitted = true;
     } catch (error) {
-      await queryRunner.rollbackTransaction();
+      if (!transactionCommitted) {
+        await queryRunner.rollbackTransaction();
+      }
       if (this.isUniqueViolation(error) && key) {
         const existingOrder = await this.ordersRepo.findOne({
           where: { idempotencyKey: key },
@@ -121,6 +138,13 @@ export class OrdersService {
     } finally {
       await queryRunner.release();
     }
+
+    if (!createdOrder) {
+      throw new NotFoundException('Order not found after creation');
+    }
+
+    this.publishOrderCreated(createdOrder);
+    return { order: createdOrder, wasDuplicate: false };
   }
 
   async createFromInput(
@@ -129,7 +153,6 @@ export class OrdersService {
   ): Promise<Order> {
     const dto: CreateOrderDto = {
       userId: input.userId,
-      status: input.status,
       items: input.items.map((item) => ({
         productId: item.productId,
         quantity: item.quantity,
@@ -139,6 +162,54 @@ export class OrdersService {
 
     const result = await this.create(dto, idempotencyKey);
     return result.order;
+  }
+
+  async processOrderMessage(message: OrderProcessMessage): Promise<void> {
+    const result = await this.dataSource.transaction(async (manager) => {
+      // Insert processed marker first: this enforces idempotency across parallel workers.
+      try {
+        await manager.insert(ProcessedMessage, {
+          messageId: message.messageId,
+          orderId: message.orderId,
+          handler: 'orders.process',
+        });
+      } catch (error) {
+        // Unique violation means the same message_id was already committed before.
+        if (this.isUniqueViolation(error)) {
+          return { deduplicated: true, order: null as Order | null, statusChanged: false };
+        }
+        throw error;
+      }
+
+      const order = await manager.findOne(Order, {
+        where: { id: message.orderId },
+      });
+
+      if (!order) {
+        throw new NotFoundException('Order not found');
+      }
+
+      // If order is already processed, keep processed_messages row and exit safely.
+      if (order.status === OrderStatus.PROCESSED) {
+        return { deduplicated: false, order, statusChanged: false };
+      }
+
+      order.status = OrderStatus.PROCESSED;
+      order.processedAt = new Date();
+      const savedOrder = await manager.save(Order, order);
+      return { deduplicated: false, order: savedOrder, statusChanged: true };
+    });
+
+    if (result.deduplicated || !result.statusChanged || !result.order) {
+      return;
+    }
+
+    this.ordersEvents.publishStatusChanged({
+      orderId: result.order.id,
+      status: result.order.status,
+      version: result.order.updatedAt?.getTime() ?? Date.now(),
+      ts: Date.now(),
+    });
   }
 
   async getAllConnection(
@@ -288,5 +359,24 @@ export class OrdersService {
 
   private isStaff(roles: string[]): boolean {
     return roles.includes('admin') || roles.includes('operator') || roles.includes('support');
+  }
+
+  private publishOrderCreated(order: Order): void {
+    const messageId = randomUUID();
+    const payload: OrderProcessMessage = {
+      messageId,
+      orderId: order.id,
+      createdAt: order.createdAt.toISOString(),
+      attempt: 0,
+      correlationId: order.id,
+      producer: 'orders-api',
+      eventName: 'order.created',
+    };
+
+    this.rabbitmqService.publishToQueue('orders.process', payload, {
+      messageId,
+      correlationId: payload.correlationId,
+      timestamp: order.createdAt.getTime(),
+    });
   }
 }

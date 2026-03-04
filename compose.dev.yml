@@ -23,6 +23,11 @@ services:
       DB_USER: ${DB_USER:-postgres}
       DB_PASS: ${DB_PASS:-postgres}
       DB_NAME: ${DB_NAME:-lecture5}
+      RABBITMQ_URL: ${RABBITMQ_URL:-amqp://guest:guest@rabbitmq:5672}
+      RABBITMQ_PREFETCH: ${RABBITMQ_PREFETCH:-10}
+      ORDERS_MAX_ATTEMPTS: ${ORDERS_MAX_ATTEMPTS:-3}
+      ORDERS_RETRY_BASE_DELAY_MS: ${ORDERS_RETRY_BASE_DELAY_MS:-1000}
+      ORDERS_RETRY_MAX_DELAY_MS: ${ORDERS_RETRY_MAX_DELAY_MS:-30000}
       JWT_SECRET: ${JWT_SECRET:-change_me_super_secret}
       JWT_EXPIRES_IN: ${JWT_EXPIRES_IN:-15m}
       AWS_REGION: ${AWS_REGION:-eu-central-1}

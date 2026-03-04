@@ -27,6 +27,7 @@ and can be scaled to new domains.
 ```
 docker compose up -d
 ```
+This also starts RabbitMQ for asynchronous order processing.
 3) Install dependencies:
 ```
 npm i
@@ -82,6 +83,11 @@ docker compose -f compose.yml run --rm seed
 API endpoint:
 ```bash
 http://localhost:8080
+```
+
+RabbitMQ management UI:
+```bash
+http://localhost:15673
 ```
 
 ### 6.2 Optimization Evidence
@@ -155,6 +161,117 @@ docker scout policy --exit-code local://e-tech:prod-distroless
 ## Modules
 - Users (`/users`)
 - Orders (`/orders`)
+
+## RabbitMQ Orders Queue Topology
+
+`POST /orders` now works as a producer flow:
+- API writes the order to PostgreSQL first.
+- Initial order status is forced to `PENDING`.
+- After the transaction commits, API publishes a message to `orders.process`.
+
+Topology for this step:
+- exchange: default exchange (`""`) for direct queue publish via `sendToQueue`
+- queue: `orders.process` (main worker queue)
+- queue: `orders.retry.process` (retry delay queue with DLX routing back to `orders.process`)
+- queue: `orders.dlq` (terminal dead-letter queue)
+- durability: all queues are `durable: true`
+
+Routing keys and message flow:
+- `orders.process`: initial order processing message from API producer.
+- `orders.retry.process`: transient failure retry publish (`attempt + 1`) with per-message TTL (`expiration`).
+- dead-letter routing key from `orders.retry.process` -> `orders.process`.
+- `orders.dlq`: permanent failures and malformed payloads.
+
+Current message shape:
+```json
+{
+  "messageId": "uuid",
+  "orderId": "uuid",
+  "createdAt": "ISO date",
+  "attempt": 0,
+  "correlationId": "uuid",
+  "producer": "orders-api",
+  "eventName": "order.created"
+}
+```
+
+Why it is manual now:
+- it keeps the first producer step simple;
+- topology is explicit in application startup;
+- on the next steps this can evolve into exchange-based routing and transactional outbox.
+
+### Worker / Consumer Flow
+
+Worker is implemented as a dedicated NestJS module:
+- `src/orders-worker/orders-worker.module.ts`
+- `src/orders-worker/orders-worker.service.ts`
+
+Current processing workflow:
+1. Worker receives message from `orders.process`.
+2. Starts DB transaction in `OrdersService.processOrderMessage`.
+3. Updates `orders.status = PROCESSED`.
+4. Sets `orders.processed_at`.
+5. Commits transaction.
+6. Only after commit, worker sends `ack`.
+
+Retry and failure behavior:
+- manual `ack` mode (`noAck: false`);
+- approach: **Variant A (republish + ack)**;
+- max attempts: `ORDERS_MAX_ATTEMPTS` (default `3`);
+- delay: exponential backoff from `ORDERS_RETRY_BASE_DELAY_MS` (default `1000`) with cap `ORDERS_RETRY_MAX_DELAY_MS` (default `30000`);
+- on failure before limit: republish to `orders.retry.process` with `attempt + 1`, then `ack` original message;
+- after limit: publish to `orders.dlq`, then `ack` original message.
+
+How to verify topology in RabbitMQ Management UI:
+1. Open `http://localhost:15673` and login with `guest/guest`.
+2. Go to **Queues and Streams**.
+3. Verify queues exist: `orders.process`, `orders.retry.process`, `orders.dlq`.
+4. Open `orders.retry.process` and check arguments:
+   - `x-dead-letter-exchange = ""`
+   - `x-dead-letter-routing-key = orders.process`
+5. Trigger processing failures and observe:
+   - messages appear in `orders.retry.process` during delay window;
+   - after retry limit, messages accumulate in `orders.dlq`.
+
+### Idempotency (at-least-once safe)
+
+Because RabbitMQ delivery is at-least-once, worker logic is protected by DB idempotency:
+- table: `processed_messages`
+- columns:
+  - `message_id` (primary key / unique)
+  - `processed_at`
+  - `order_id`
+  - `handler` (optional)
+
+Algorithm used in `OrdersService.processOrderMessage`:
+1. Start DB transaction.
+2. Try `INSERT INTO processed_messages(message_id, order_id, handler, ...)`.
+3. If unique violation (`message_id` already exists):
+   - treat as duplicate delivery,
+   - return without business reprocessing,
+   - worker `ack` is sent by caller.
+4. If insert succeeds:
+   - execute business logic (`orders.status = PROCESSED`, `processed_at`),
+   - commit transaction,
+   - worker sends `ack`.
+
+Why it is safe for parallel workers:
+- unique constraint on `message_id` guarantees only one worker can commit the first insert;
+- all other concurrent workers receive unique violation and exit without duplicate side effects.
+
+### Worker Logging
+
+Worker logs always include:
+- `messageId`
+- `orderId`
+- `attempt`
+- `result` (`success` / `retry` / `dlq`)
+- short `reason` (for failures/retries)
+
+Example log line:
+```text
+result=retry messageId=... orderId=... attempt=1 reason=Order not found; nextAttempt=2; delayMs=2000
+```
 
 ## Realtime Orders Status
 

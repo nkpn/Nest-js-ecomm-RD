@@ -4,6 +4,7 @@ import { Order } from './src/orders/entity/order.entity';
 import { OrderItem } from './src/orders/entity/order-item.entity';
 import { Product } from './src/products/entity/product.entity';
 import { User } from './src/users/entity/user.entity';
+import { ProcessedMessage } from './src/idempotency/processed-message.entity';
 
 const dataSource = new DataSource({
   type: 'postgres',
@@ -14,7 +15,7 @@ const dataSource = new DataSource({
   database: process.env.DB_NAME,
   ssl:
     process.env.DB_SSL === 'true' ? { rejectUnauthorized: false } : undefined,
-  entities: [User, Product, Order, OrderItem],
+  entities: [User, Product, Order, OrderItem, ProcessedMessage],
   migrations: ['src/migrations/*.ts'],
   synchronize: false,
 });

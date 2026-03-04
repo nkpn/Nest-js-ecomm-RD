@@ -16,6 +16,14 @@ services:
       timeout: 3s
       retries: 20
 
+  rabbitmq:
+    image: rabbitmq:3-management
+    container_name: lesson11-queues-outbox-rabbitmq
+    restart: unless-stopped
+    ports:
+      - '5673:5672'
+      - '15673:15672'
+
   migrate:
     # One-off container: run DB migrations, then exit.
     profiles: ['jobs']
