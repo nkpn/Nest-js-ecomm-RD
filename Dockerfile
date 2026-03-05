@@ -32,8 +32,7 @@ ENV NODE_ENV=development
 # Install runtime dependencies only (without devDependencies).
 FROM base AS prod-deps
 COPY package.json package-lock.json ./
-RUN --mount=type=cache,target=/root/.npm npm ci --omit=dev \
-  && npm cache clean --force
+RUN --mount=type=cache,target=/root/.npm,sharing=locked npm ci --omit=dev
 
 # 3) prod stage:
 # Runtime image with only what is needed to start Nest in production.

@@ -58,23 +58,26 @@ npm run start:prod
 ## 6. Docker / Compose Guide
 
 ### 6.1 Run Commands
-Development (hot reload + bind mount):
+Required env vars (no weak fallbacks in compose):
 ```bash
-docker compose -f compose.yml -f compose.dev.yml up --build
+export DB_PASS=replace_with_strong_db_password
+export JWT_SECRET=replace_with_long_random_jwt_secret
 ```
 
 Production-like local run:
 ```bash
-docker compose -f compose.yml up --build
+export PORT=8080
+export RABBITMQ_PORT=5673
+export RABBITMQ_MGMT_PORT=15673
+docker compose -f compose.yml up --build -d
+```
+
+Development (hot reload + bind mount):
+```bash
+docker compose -f compose.yml -f compose.dev.yml up --build -d
 ```
 
 Migrations / seed as one-off jobs:
-```bash
-docker compose run --rm migrate
-docker compose run --rm seed
-```
-
-If your repository contains both `compose.yml` and `docker-compose.yml`, use explicit file selection for jobs:
 ```bash
 docker compose -f compose.yml run --rm migrate
 docker compose -f compose.yml run --rm seed
@@ -82,46 +85,92 @@ docker compose -f compose.yml run --rm seed
 
 API endpoint:
 ```bash
-http://localhost:8080
+http://localhost:${PORT:-8080}
 ```
 
 RabbitMQ management UI:
 ```bash
-http://localhost:15673
+http://localhost:${RABBITMQ_MGMT_PORT:-15673}
+```
+
+Fail-fast proof for required secrets:
+```bash
+docker compose -f compose.yml config
+```
+```text
+error while interpolating services.api.environment.JWT_SECRET:
+required variable JWT_SECRET is missing a value: JWT_SECRET is required
 ```
 
 ### 6.2 Optimization Evidence
 Compare image sizes:
 ```bash
-docker build --target dev -t e-tech:dev .
-docker build --target prod -t e-tech:prod .
-docker build --target prod-distroless -t e-tech:prod-distroless .
-docker image ls | grep 'e-tech'
+docker build --target dev -t rd-hw10-fix:dev .
+docker build --target prod -t rd-hw10-fix:prod .
+docker build --target prod-distroless -t rd-hw10-fix:prod-distroless .
+docker image ls --format 'table {{.Repository}}\t{{.Tag}}\t{{.Size}}' | (head -n 1 && rg '^rd-hw10-fix\s')
+```
+
+Output:
+```text
+REPOSITORY                 TAG                    SIZE
+rd-hw10-fix                prod-distroless        421MB
+rd-hw10-fix                prod                   555MB
+rd-hw10-fix                dev                    769MB
 ```
 
 Inspect image layers:
 ```bash
-docker history e-tech:dev
-docker history e-tech:prod
-docker history e-tech:prod-distroless
+docker history rd-hw10-fix:dev --format '{{.Size}}\t{{.CreatedBy}}' | head -n 8
+docker history rd-hw10-fix:prod --format '{{.Size}}\t{{.CreatedBy}}' | head -n 8
+docker history rd-hw10-fix:prod-distroless --format '{{.Size}}\t{{.CreatedBy}}' | head -n 8
+```
+
+Output snippets:
+```text
+dev:
+0B    CMD ["npm" "run" "start:dev"]
+0B    ENV NODE_ENV=development
+375MB RUN /bin/sh -c npm ci # buildkit
+524kB COPY package.json package-lock.json ./ # buildkit
+```
+```text
+prod:
+0B    CMD ["node" "dist/src/main.js"]
+0B    EXPOSE map[3000/tcp:{}]
+0B    USER node
+1.58MB COPY /app/dist ./dist # buildkit
+185MB COPY /app/node_modules ./node_modules # buildkit
+```
+```text
+prod-distroless:
+0B    CMD ["dist/src/main.js"]
+0B    EXPOSE map[3000/tcp:{}]
+1.58MB COPY /app/dist ./dist # buildkit
+185MB COPY /app/node_modules ./node_modules # buildkit
+121MB bazel build @nodejs22_arm64//:data
 ```
 
 Short conclusion:
-- `prod-distroless` is usually smaller than `dev` and often smaller/similar to `prod`.
+- `prod-distroless` is 348MB smaller than `dev` and 134MB smaller than `prod`.
 - `prod-distroless` is safer because it has no package manager/shell and uses non-root base (`nonroot`).
 
 ### 6.3 Non-root Verification
 For `prod` image:
 ```bash
-docker run --rm --entrypoint id e-tech:prod -u
+docker run --rm --entrypoint id rd-hw10-fix:prod -u
 ```
-Expected: non-zero/non-root UID (not `0`).
+```text
+1000
+```
 
 For `prod-distroless` image:
 ```bash
-docker run --rm --entrypoint /nodejs/bin/node e-tech:prod-distroless -e "console.log(process.getuid())"
+docker run --rm --entrypoint /nodejs/bin/node rd-hw10-fix:prod-distroless -e "console.log(process.getuid())"
 ```
-Expected: `65532` (`nonroot` user in distroless image).
+```text
+65532
+```
 
 Why this guarantees non-root in distroless:
 - base image is `gcr.io/distroless/nodejs22-debian12:nonroot`;
