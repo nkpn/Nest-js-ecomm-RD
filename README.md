@@ -314,12 +314,150 @@ Worker logs always include:
 - `messageId`
 - `orderId`
 - `attempt`
-- `result` (`success` / `retry` / `dlq`)
+- `result` (`success` / `dedup` / `retry` / `dlq`)
 - short `reason` (for failures/retries)
 
 Example log line:
 ```text
 result=retry messageId=... orderId=... attempt=1 reason=Order not found; nextAttempt=2; delayMs=2000
+```
+
+## HW12 Runtime Verification (No Manual SQL)
+
+These commands validate all required scenarios end-to-end:
+- happy path
+- retry
+- DLQ
+- idempotency (`messageId` dedup)
+
+Prerequisites:
+- Docker + Docker Compose
+- Node.js (for helper script)
+- `jq` and `rg` installed locally
+
+### 1) Start stack and initialize DB
+
+```bash
+export DB_PASS=postgres
+export JWT_SECRET=test_secret
+export PORT=8080
+export RABBITMQ_PORT=5673
+export RABBITMQ_MGMT_PORT=15673
+
+docker compose -f compose.yml up -d --build postgres rabbitmq api
+docker compose -f compose.yml run --rm migrate
+docker compose -f compose.yml run --rm seed
+```
+
+### 2) Prepare IDs for order creation
+
+```bash
+API_URL="http://localhost:${PORT}"
+USER_ID=$(curl -fsS "$API_URL/users" | jq -r '.[0].id')
+PRODUCT_ID=$(curl -fsS "$API_URL/products" | jq -r '.[] | select(.stock > 0) | .id' | head -n1)
+
+echo "USER_ID=$USER_ID"
+echo "PRODUCT_ID=$PRODUCT_ID"
+```
+
+### 3) Happy path (`PENDING -> PROCESSED`)
+
+```bash
+CREATE_RESPONSE=$(curl -fsS -X POST "$API_URL/orders" \
+  -H "content-type: application/json" \
+  -d "{\"userId\":\"$USER_ID\",\"items\":[{\"productId\":\"$PRODUCT_ID\",\"quantity\":1,\"priceSnapshot\":9.99}]}")
+
+ORDER_ID=$(echo "$CREATE_RESPONSE" | jq -r '.id')
+echo "$CREATE_RESPONSE" | jq -r '.status'
+```
+
+Expected immediately after `POST /orders`:
+- HTTP response is fast
+- initial status is `PENDING`
+
+Wait for worker processing:
+
+```bash
+until [ "$(curl -fsS "$API_URL/orders/$ORDER_ID" | jq -r '.status')" = "PROCESSED" ]; do
+  sleep 1
+done
+
+curl -fsS "$API_URL/orders/$ORDER_ID" | jq '{status, processedAt}'
+```
+
+Expected:
+- `status = "PROCESSED"`
+- `processedAt` is not `null`
+
+### 4) Retry scenario (transient failure)
+
+```bash
+BROKER_URL="amqp://guest:guest@localhost:${RABBITMQ_PORT}"
+INVALID_ORDER_ID="00000000-0000-0000-0000-000000000000"
+RETRY_MESSAGE_ID=$(node -e "console.log(require('node:crypto').randomUUID())")
+
+node scripts/publish-order-message.js \
+  --url "$BROKER_URL" \
+  --queue orders.process \
+  --orderId "$INVALID_ORDER_ID" \
+  --messageId "$RETRY_MESSAGE_ID" \
+  --attempt 0
+
+sleep 3
+docker compose -f compose.yml logs --since=30s api | rg "$RETRY_MESSAGE_ID"
+```
+
+Expected in logs:
+- at least one `result=retry ... attempt=0`
+- then `result=retry ... attempt=1`
+
+### 5) DLQ after max attempts
+
+```bash
+sleep 3
+docker compose -f compose.yml logs --since=60s api | rg "$RETRY_MESSAGE_ID"
+docker compose -f compose.yml exec -T rabbitmq rabbitmqctl list_queues name messages | rg 'orders\\.process|orders\\.retry\\.process|orders\\.dlq'
+```
+
+Expected:
+- log line with `result=dlq ... attempt=2`
+- `orders.dlq` message counter increases
+
+### 6) Idempotency scenario (same `messageId` twice)
+
+```bash
+DEDUP_MESSAGE_ID=$(node -e "console.log(require('node:crypto').randomUUID())")
+PROCESSED_AT_BEFORE=$(curl -fsS "$API_URL/orders/$ORDER_ID" | jq -r '.processedAt')
+
+node scripts/publish-order-message.js \
+  --url "$BROKER_URL" \
+  --queue orders.process \
+  --orderId "$ORDER_ID" \
+  --messageId "$DEDUP_MESSAGE_ID" \
+  --attempt 0
+
+node scripts/publish-order-message.js \
+  --url "$BROKER_URL" \
+  --queue orders.process \
+  --orderId "$ORDER_ID" \
+  --messageId "$DEDUP_MESSAGE_ID" \
+  --attempt 0
+
+sleep 2
+PROCESSED_AT_AFTER=$(curl -fsS "$API_URL/orders/$ORDER_ID" | jq -r '.processedAt')
+test "$PROCESSED_AT_BEFORE" = "$PROCESSED_AT_AFTER" && echo "processedAt unchanged"
+docker compose -f compose.yml logs --since=60s api | rg "$DEDUP_MESSAGE_ID"
+```
+
+Expected:
+- one line with `result=success ... reason=already_processed`
+- one line with `result=dedup ... reason=duplicate_message_id`
+- `processedAt` stays unchanged, so duplicate delivery does not duplicate side effects
+
+### 7) Cleanup
+
+```bash
+docker compose -f compose.yml down -v --remove-orphans
 ```
 
 ## Realtime Orders Status

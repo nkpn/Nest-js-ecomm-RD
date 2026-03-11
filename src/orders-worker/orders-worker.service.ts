@@ -5,7 +5,7 @@ import {
   RabbitConsumeMessage,
   RabbitmqService,
 } from '../rabbitmq/rabbitmq.service';
-import { OrdersService } from '../orders/order.service';
+import { OrdersService, ProcessOrderMessageResult } from '../orders/order.service';
 import { OrderProcessMessage } from '../orders/order-process-message.type';
 
 @Injectable()
@@ -83,7 +83,36 @@ export class OrdersWorkerService implements OnApplicationBootstrap {
 
     try {
       // Ack only after the DB transaction commits inside processOrderMessage.
-      await this.ordersService.processOrderMessage({ ...payload, attempt });
+      const processingResult = await this.ordersService.processOrderMessage({
+        ...payload,
+        attempt,
+      });
+      const outcome: ProcessOrderMessageResult['outcome'] =
+        processingResult?.outcome ?? 'processed';
+      if (outcome === 'deduplicated') {
+        this.logDeliveryResult({
+          messageId: payload.messageId ?? '(missing)',
+          orderId: payload.orderId ?? '(missing)',
+          attempt,
+          result: 'dedup',
+          reason: 'duplicate_message_id',
+        });
+        channel.ack(message);
+        return;
+      }
+
+      if (outcome === 'already_processed') {
+        this.logDeliveryResult({
+          messageId: payload.messageId ?? '(missing)',
+          orderId: payload.orderId ?? '(missing)',
+          attempt,
+          result: 'success',
+          reason: 'already_processed',
+        });
+        channel.ack(message);
+        return;
+      }
+
       this.logDeliveryResult({
         messageId: payload.messageId ?? '(missing)',
         orderId: payload.orderId ?? '(missing)',
@@ -189,11 +218,11 @@ export class OrdersWorkerService implements OnApplicationBootstrap {
     messageId: string;
     orderId: string;
     attempt: number;
-    result: 'success' | 'retry' | 'dlq';
+    result: 'success' | 'dedup' | 'retry' | 'dlq';
     reason: string;
   }): void {
     const line = `result=${input.result} messageId=${input.messageId} orderId=${input.orderId} attempt=${input.attempt} reason=${input.reason}`;
-    if (input.result === 'success') {
+    if (input.result === 'success' || input.result === 'dedup') {
       this.logger.log(line);
       return;
     }

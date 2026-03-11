@@ -25,6 +25,11 @@ import { RabbitmqService } from '../rabbitmq/rabbitmq.service';
 import { OrderProcessMessage } from './order-process-message.type';
 import { ProcessedMessage } from '../idempotency/processed-message.entity';
 
+export type ProcessOrderMessageResult = {
+  outcome: 'processed' | 'already_processed' | 'deduplicated';
+  orderId: string;
+};
+
 @Injectable()
 export class OrdersService {
   private readonly logger = new Logger(OrdersService.name);
@@ -164,7 +169,9 @@ export class OrdersService {
     return result.order;
   }
 
-  async processOrderMessage(message: OrderProcessMessage): Promise<void> {
+  async processOrderMessage(
+    message: OrderProcessMessage,
+  ): Promise<ProcessOrderMessageResult> {
     const result = await this.dataSource.transaction(async (manager) => {
       // Insert processed marker first: this enforces idempotency across parallel workers.
       try {
@@ -200,8 +207,12 @@ export class OrdersService {
       return { deduplicated: false, order: savedOrder, statusChanged: true };
     });
 
-    if (result.deduplicated || !result.statusChanged || !result.order) {
-      return;
+    if (result.deduplicated) {
+      return { outcome: 'deduplicated', orderId: message.orderId };
+    }
+
+    if (!result.statusChanged || !result.order) {
+      return { outcome: 'already_processed', orderId: message.orderId };
     }
 
     this.ordersEvents.publishStatusChanged({
@@ -210,6 +221,8 @@ export class OrdersService {
       version: result.order.updatedAt?.getTime() ?? Date.now(),
       ts: Date.now(),
     });
+
+    return { outcome: 'processed', orderId: result.order.id };
   }
 
   async getAllConnection(

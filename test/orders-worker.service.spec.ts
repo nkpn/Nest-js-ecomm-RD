@@ -85,6 +85,39 @@ describe('OrdersWorkerService', () => {
     ).toBeLessThan(ack.mock.invocationCallOrder[0]);
   });
 
+  it('acks duplicate deliveries without retry publish', async () => {
+    let handler: ((message: any, channel: any) => Promise<void>) | undefined;
+    rabbitmqService.consume.mockImplementation(
+      async (_queue: string, callback: (message: any, channel: any) => Promise<void>) => {
+        handler = callback;
+      },
+    );
+
+    await service.onApplicationBootstrap();
+
+    const ack = jest.fn();
+    const message = {
+      content: Buffer.from(
+        JSON.stringify({
+          messageId: 'm-dedup',
+          orderId: 'o1',
+          createdAt: new Date().toISOString(),
+          attempt: 0,
+        }),
+      ),
+    };
+
+    ordersService.processOrderMessage.mockResolvedValue({
+      outcome: 'deduplicated',
+      orderId: 'o1',
+    });
+
+    await handler!(message, { ack, nack: jest.fn() });
+
+    expect(rabbitmqService.publishToQueue).not.toHaveBeenCalled();
+    expect(ack).toHaveBeenCalledTimes(1);
+  });
+
   it('requeues message with incremented attempt on transient failure and delay', async () => {
     let handler: ((message: any, channel: any) => Promise<void>) | undefined;
     rabbitmqService.consume.mockImplementation(
