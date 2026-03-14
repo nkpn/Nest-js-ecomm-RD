@@ -55,6 +55,107 @@ npm run build
 npm run start:prod
 ```
 
+## gRPC Payments Microservice
+
+### Local run: 2 services, 2 processes
+
+Prerequisites for `orders-service`:
+```bash
+docker compose up -d postgres rabbitmq
+npm i
+npm run migration:run
+```
+
+Terminal 1 (`payments-service`, gRPC server on `5022`):
+```bash
+PAYMENTS_GRPC_BIND_URL=0.0.0.0:5022 NODE_ENV=dev npm run start:payments:dev
+```
+
+Terminal 2 (`orders-service`, HTTP on `3000`):
+```bash
+PAYMENTS_GRPC_URL=localhost:5022 PAYMENTS_GRPC_TIMEOUT_MS=1000 PORT=3000 NODE_ENV=dev npm run start:dev
+```
+
+Required env for this flow:
+- `PAYMENTS_GRPC_BIND_URL` — where payments gRPC server listens (default `0.0.0.0:5022`)
+- `PAYMENTS_GRPC_URL` — where orders gRPC client connects (default `localhost:5022`)
+- `PAYMENTS_GRPC_TIMEOUT_MS` — deadline/timeout for Authorize RPC (default `1000`)
+- `PAYMENTS_GRPC_AUTHORIZE_MAX_RETRIES` — max retries for Authorize on transient gRPC failures (default `2`)
+- `PAYMENTS_GRPC_RETRY_BACKOFF_MS` — base retry backoff in ms (default `150`)
+- `PAYMENTS_GRPC_RETRY_MAX_BACKOFF_MS` — max retry backoff cap in ms (default `2000`)
+- `PORT` — orders HTTP port (default `3000`)
+
+Retry behavior:
+- only transient gRPC errors are retried (`UNAVAILABLE`)
+- backoff is exponential: `base * 2^(attempt-1)` with max cap
+- non-transient gRPC failures are returned immediately without retries
+
+### Happy path via curl
+
+1. Create user:
+```bash
+USER_ID=$(curl -sS -X POST http://localhost:3000/users \
+  -H 'content-type: application/json' \
+  -d '{"email":"grpc.user@example.com","password":"secret123"}' | jq -r '.id')
+```
+
+2. Create product:
+```bash
+PRODUCT_ID=$(curl -sS -X POST http://localhost:3000/products \
+  -H 'content-type: application/json' \
+  -d '{"name":"gRPC Demo Product","sku":"grpc-demo-1","price":199.99,"stock":5,"isActive":true}' | jq -r '.id')
+```
+
+3. Create order:
+```bash
+ORDER_ID=$(curl -sS -X POST http://localhost:3000/orders \
+  -H 'content-type: application/json' \
+  -d "{\"userId\":\"$USER_ID\",\"items\":[{\"productId\":\"$PRODUCT_ID\",\"quantity\":1,\"priceSnapshot\":199.99}]}" | jq -r '.id')
+```
+
+4. Authorize payment through Orders -> Payments gRPC:
+```bash
+AUTH_RESPONSE=$(curl -sS -X POST "http://localhost:3000/orders/$ORDER_ID/payments/authorize" \
+  -H 'content-type: application/json' \
+  -d '{"currency":"USD"}')
+echo "$AUTH_RESPONSE"
+PAYMENT_ID=$(echo "$AUTH_RESPONSE" | jq -r '.paymentId')
+```
+
+Expected response shape:
+```json
+{
+  "paymentId": "uuid",
+  "status": "PAYMENT_STATUS_AUTHORIZED"
+}
+```
+
+5. Get payment status:
+```bash
+curl -sS "http://localhost:3000/orders/payments/$PAYMENT_ID/status"
+```
+
+### Where `.proto` lives and how it is wired
+
+- Contract file: `proto/payments.proto`
+- `orders-service` gRPC client uses this contract in `src/orders/order.module.ts`:
+  - `protoPath: join(process.cwd(), 'proto/payments.proto')`
+  - `package: payments.v1`
+- `payments-service` gRPC server uses the same contract in `src/payments-service/main.ts`:
+  - `protoPath: join(process.cwd(), 'proto/payments.proto')`
+  - `package: payments.v1`
+
+No direct imports from `payments-service` into `orders-service` are used for RPC flow; communication is contract-only via `.proto`.
+
+### gRPC Status -> Orders Domain Errors (HTTP)
+
+- `INVALID_ARGUMENT` -> `400 ORDERS_PAYMENT_VALIDATION_FAILED`
+- `NOT_FOUND` -> `404 ORDERS_PAYMENT_NOT_FOUND`
+- `FAILED_PRECONDITION` / `ALREADY_EXISTS` -> `409 ORDERS_PAYMENT_CONFLICT`
+- `DEADLINE_EXCEEDED` -> `504 ORDERS_PAYMENT_TIMEOUT`
+- `UNAVAILABLE` -> `503 ORDERS_PAYMENT_UNAVAILABLE`
+- fallback -> `502 ORDERS_PAYMENT_INTEGRATION_ERROR`
+
 ## 6. Docker / Compose Guide
 
 ### 6.1 Run Commands

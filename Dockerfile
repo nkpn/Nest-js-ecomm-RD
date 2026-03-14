@@ -42,6 +42,7 @@ ENV NODE_ENV=production
 
 COPY --from=prod-deps /app/node_modules ./node_modules
 COPY --from=build /app/dist ./dist
+COPY --from=build /app/proto ./proto
 
 USER node
 EXPOSE 3000
@@ -55,6 +56,7 @@ ENV NODE_ENV=production
 
 COPY --from=prod-deps /app/node_modules ./node_modules
 COPY --from=build /app/dist ./dist
+COPY --from=build /app/proto ./proto
 
 EXPOSE 3000
 # Distroless node image already has node as entrypoint.

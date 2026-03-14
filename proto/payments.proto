@@ -1,0 +1,55 @@
+syntax = "proto3";
+
+package payments.v1;
+
+service Payments {
+  rpc Authorize (AuthorizeRequest) returns (AuthorizeResponse);
+  rpc GetPaymentStatus (GetPaymentStatusRequest) returns (GetPaymentStatusResponse);
+  rpc Capture (CaptureRequest) returns (OperationResponse);
+  rpc Refund (RefundRequest) returns (OperationResponse);
+}
+
+enum PaymentStatus {
+  PAYMENT_STATUS_UNSPECIFIED = 0;
+  PAYMENT_STATUS_AUTHORIZED = 1;
+  PAYMENT_STATUS_CAPTURED = 2;
+  PAYMENT_STATUS_REFUNDED = 3;
+  PAYMENT_STATUS_FAILED = 4;
+}
+
+message AuthorizeRequest {
+  string order_id = 1;
+  string amount = 2;
+  string currency = 3;
+  string idempotency_key = 4;
+  bool simulate_unavailable_once = 5;
+}
+
+message AuthorizeResponse {
+  string payment_id = 1;
+  PaymentStatus status = 2;
+}
+
+message GetPaymentStatusRequest {
+  string payment_id = 1;
+}
+
+message GetPaymentStatusResponse {
+  string payment_id = 1;
+  PaymentStatus status = 2;
+}
+
+message CaptureRequest {
+  string payment_id = 1;
+  string idempotency_key = 2;
+}
+
+message RefundRequest {
+  string payment_id = 1;
+  string idempotency_key = 2;
+}
+
+message OperationResponse {
+  bool ok = 1;
+  string message = 2;
+}
