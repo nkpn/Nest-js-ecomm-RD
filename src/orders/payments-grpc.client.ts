@@ -4,7 +4,7 @@ import {
   Logger,
   OnModuleInit,
 } from '@nestjs/common';
-import { CallOptions, status as GrpcStatus } from '@grpc/grpc-js';
+import { CallOptions, Metadata, status as GrpcStatus } from '@grpc/grpc-js';
 import { ConfigService } from '@nestjs/config';
 import type { ClientGrpc } from '@nestjs/microservices';
 import {
@@ -53,12 +53,12 @@ type GetPaymentStatusRequest = {
 interface PaymentsGrpcService {
   Authorize(
     payload: AuthorizePaymentRequest,
-    metadata?: undefined,
+    metadataOrOptions?: Metadata | CallOptions,
     options?: CallOptions,
   ): Observable<AuthorizePaymentResponse>;
   GetPaymentStatus(
     payload: GetPaymentStatusRequest,
-    metadata?: undefined,
+    metadataOrOptions?: Metadata | CallOptions,
     options?: CallOptions,
   ): Observable<GetPaymentStatusResponse>;
 }
@@ -93,7 +93,7 @@ export class PaymentsGrpcClient implements OnModuleInit {
     try {
       return await firstValueFrom(
         this.paymentsService
-          .Authorize(payload, undefined, callOptions)
+          .Authorize(payload, callOptions)
           .pipe(
             timeout(timeoutMs),
             retry({
@@ -129,7 +129,7 @@ export class PaymentsGrpcClient implements OnModuleInit {
     try {
       return await firstValueFrom(
         this.paymentsService
-          .GetPaymentStatus({ paymentId }, undefined, callOptions)
+          .GetPaymentStatus({ paymentId }, callOptions)
           .pipe(timeout(timeoutMs)),
       );
     } catch (error) {
@@ -208,7 +208,11 @@ export class PaymentsGrpcClient implements OnModuleInit {
       typeof error === 'object' && error !== null && 'details' in error
         ? (error as { details?: string }).details
         : undefined;
-    const message = details ?? 'unknown grpc error';
+    const fallbackMessage =
+      typeof error === 'object' && error !== null && 'message' in error
+        ? (error as { message?: string }).message
+        : undefined;
+    const message = details ?? fallbackMessage ?? 'unknown grpc error';
 
     if (code === GrpcStatus.INVALID_ARGUMENT) {
       return new OrdersPaymentValidationError(

@@ -120,6 +120,10 @@ AUTH_RESPONSE=$(curl -sS -X POST "http://localhost:3000/orders/$ORDER_ID/payment
   -d '{"currency":"USD"}')
 echo "$AUTH_RESPONSE"
 PAYMENT_ID=$(echo "$AUTH_RESPONSE" | jq -r '.paymentId')
+if ! echo "$PAYMENT_ID" | grep -Eq '^[0-9a-fA-F-]{36}$'; then
+  echo "Authorize failed or returned invalid paymentId"
+  exit 1
+fi
 ```
 
 Expected response shape:
@@ -130,9 +134,25 @@ Expected response shape:
 }
 ```
 
+Real example after fix (2026-03-21):
+```json
+{
+  "paymentId": "a0756035-40c5-418f-9879-6d3bc181d980",
+  "status": "PAYMENT_STATUS_AUTHORIZED"
+}
+```
+
 5. Get payment status:
 ```bash
 curl -sS "http://localhost:3000/orders/payments/$PAYMENT_ID/status"
+```
+
+Real example after fix (2026-03-21):
+```json
+{
+  "paymentId": "a0756035-40c5-418f-9879-6d3bc181d980",
+  "status": "PAYMENT_STATUS_AUTHORIZED"
+}
 ```
 
 ### Where `.proto` lives and how it is wired
