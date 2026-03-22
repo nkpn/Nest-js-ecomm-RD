@@ -623,6 +623,7 @@ Optional params:
 
 ### User
 User module provides endpoints for creating a user and get all users.
+
 Routes:
 - GET /users
 - POST /users
