@@ -19,10 +19,24 @@ jobs:
     name: Build and push Docker image to Docker Hub (immutable tag)
     runs-on: ubuntu-latest
     timeout-minutes: 25
+    environment:
+      name: ${{ github.ref_name == 'main' && 'production' || 'development' }}
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+
+      - name: Validate Docker Hub credentials
+        shell: bash
+        env:
+          DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+          DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+        run: |
+          if [[ -z "${DOCKERHUB_USERNAME}" || -z "${DOCKERHUB_TOKEN}" ]]; then
+            echo "Missing DOCKERHUB_USERNAME/DOCKERHUB_TOKEN in selected environment secrets."
+            echo "Selected environment: ${{ github.ref_name == 'main' && 'production' || 'development' }}"
+            exit 1
+          fi
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
