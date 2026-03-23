@@ -3,7 +3,7 @@ name: Build Artifact
 on:
   push:
     branches:
-      - development
+      - develop
       - main
   workflow_dispatch:
 
@@ -42,6 +42,7 @@ jobs:
           echo "tag=sha-${GITHUB_SHA}" >> "${GITHUB_OUTPUT}"
 
       - name: Build and push image
+        id: build
         uses: docker/build-push-action@v6
         with:
           context: .
@@ -52,6 +53,26 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
+      - name: Generate release manifest
+        run: |
+          cat > release-manifest.json <<EOF
+          {
+            "commit": "${GITHUB_SHA}",
+            "services": {
+              "orders-api": {
+                "image": "${{ steps.prep.outputs.image }}:${{ steps.prep.outputs.tag }}",
+                "digest": "${{ steps.build.outputs.digest }}"
+              }
+            }
+          }
+          EOF
+
+      - name: Upload release manifest
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-manifest-${{ github.sha }}
+          path: release-manifest.json
+
       - name: Publish build summary
         run: |
           {
@@ -59,4 +80,6 @@ jobs:
             echo "- Registry: Docker Hub"
             echo "- Image: ${{ steps.prep.outputs.image }}"
             echo "- Immutable tag: ${{ steps.prep.outputs.tag }}"
+            echo "- Image digest: ${{ steps.build.outputs.digest }}"
+            echo "- Release manifest: release-manifest.json"
           } >> "$GITHUB_STEP_SUMMARY"
