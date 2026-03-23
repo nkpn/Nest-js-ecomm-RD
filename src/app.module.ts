@@ -15,6 +15,7 @@ import { OrderItemResolver } from './graphql/order-item.resolver';
 import { ProductLoader } from './graphql/dataloaders/product.loader';
 import { RealtimeModule } from './realtime/realtime.module';
 import { OrdersWorkerModule } from './orders-worker/orders-worker.module';
+import { HealthModule } from './health/health.module';
 
 @Module({
   imports: [
@@ -30,6 +31,7 @@ import { OrdersWorkerModule } from './orders-worker/orders-worker.module';
     FilesModule,
     RealtimeModule,
     OrdersWorkerModule,
+    HealthModule,
     GraphQLModule.forRoot<ApolloDriverConfig>({
       driver: ApolloDriver,
       autoSchemaFile: true,
