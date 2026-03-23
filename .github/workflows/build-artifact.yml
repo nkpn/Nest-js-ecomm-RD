@@ -1,0 +1,85 @@
+name: Build Artifact
+
+on:
+  push:
+    branches:
+      - develop
+      - main
+  workflow_dispatch:
+
+concurrency:
+  group: build-artifact-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-push:
+    name: Build and push Docker image to Docker Hub (immutable tag)
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Prepare image coordinates
+        id: prep
+        shell: bash
+        run: |
+          repo_name_lc="$(echo "${{ github.event.repository.name }}" | tr '[:upper:]' '[:lower:]')"
+          echo "image=${{ secrets.DOCKERHUB_USERNAME }}/${repo_name_lc}" >> "${GITHUB_OUTPUT}"
+          echo "tag=sha-${GITHUB_SHA}" >> "${GITHUB_OUTPUT}"
+
+      - name: Build and push image
+        id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./Dockerfile
+          target: prod-distroless
+          push: true
+          tags: ${{ steps.prep.outputs.image }}:${{ steps.prep.outputs.tag }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Generate release manifest
+        run: |
+          cat > release-manifest.json <<EOF
+          {
+            "commit": "${GITHUB_SHA}",
+            "services": {
+              "orders-api": {
+                "image": "${{ steps.prep.outputs.image }}:${{ steps.prep.outputs.tag }}",
+                "digest": "${{ steps.build.outputs.digest }}"
+              }
+            }
+          }
+          EOF
+
+      - name: Upload release manifest
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-manifest-${{ github.sha }}
+          path: release-manifest.json
+
+      - name: Publish build summary
+        run: |
+          {
+            echo "## Build artifact published"
+            echo "- Registry: Docker Hub"
+            echo "- Image: ${{ steps.prep.outputs.image }}"
+            echo "- Immutable tag: ${{ steps.prep.outputs.tag }}"
+            echo "- Image digest: ${{ steps.build.outputs.digest }}"
+            echo "- Release manifest: release-manifest.json"
+          } >> "$GITHUB_STEP_SUMMARY"
