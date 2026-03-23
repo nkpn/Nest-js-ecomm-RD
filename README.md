@@ -72,6 +72,7 @@ PAYMENTS_GRPC_BIND_URL=0.0.0.0:5022 NODE_ENV=dev npm run start:payments:dev
 ```
 
 
+
 Terminal 2 (`orders-service`, HTTP on `3000`):
 ```bash
 PAYMENTS_GRPC_URL=localhost:5022 PAYMENTS_GRPC_TIMEOUT_MS=1000 PORT=3000 NODE_ENV=dev npm run start:dev
