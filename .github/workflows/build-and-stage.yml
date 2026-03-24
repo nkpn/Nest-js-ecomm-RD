@@ -1,0 +1,220 @@
+name: Build And Stage
+
+on:
+  push:
+    branches:
+      - develop
+  workflow_dispatch:
+
+concurrency:
+  group: build-and-stage-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-push:
+    name: Build and push Docker image (immutable tag)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment:
+      name: development
+    outputs:
+      commit_sha: ${{ steps.meta.outputs.commit_sha }}
+      image_tag: ${{ steps.meta.outputs.image_tag }}
+      image_ref: ${{ steps.meta.outputs.image_ref }}
+      image_digest: ${{ steps.build.outputs.digest }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Validate Docker Hub credentials
+        shell: bash
+        env:
+          DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+          DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+        run: |
+          if [[ -z "${DOCKERHUB_USERNAME}" || -z "${DOCKERHUB_TOKEN}" ]]; then
+            echo "Missing DOCKERHUB_USERNAME/DOCKERHUB_TOKEN in development environment secrets."
+            exit 1
+          fi
+
+      - name: Set up QEMU for cross-platform builds
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Prepare image coordinates
+        id: meta
+        shell: bash
+        run: |
+          repo_name_lc="$(echo "${{ github.event.repository.name }}" | tr '[:upper:]' '[:lower:]')"
+          commit_sha="${GITHUB_SHA}"
+          image_repo="${{ secrets.DOCKERHUB_USERNAME }}/${repo_name_lc}"
+          image_tag="sha-${commit_sha}"
+          image_ref="${image_repo}:${image_tag}"
+
+          echo "commit_sha=${commit_sha}" >> "${GITHUB_OUTPUT}"
+          echo "image_tag=${image_tag}" >> "${GITHUB_OUTPUT}"
+          echo "image_ref=${image_ref}" >> "${GITHUB_OUTPUT}"
+
+      - name: Build and push image
+        id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./Dockerfile
+          target: prod-distroless
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.image_ref }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Generate release manifest
+        shell: bash
+        run: |
+          cat > release-manifest.json <<EOF
+          {
+            "commit": "${{ steps.meta.outputs.commit_sha }}",
+            "services": {
+              "orders-api": {
+                "image": "${{ steps.meta.outputs.image_ref }}",
+                "digest": "${{ steps.build.outputs.digest }}"
+              }
+            }
+          }
+          EOF
+
+      - name: Upload release manifest
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-manifest-${{ github.sha }}
+          path: release-manifest.json
+
+      - name: Build summary
+        shell: bash
+        run: |
+          {
+            echo "## Build artifact published"
+            echo "- Commit SHA: ${{ steps.meta.outputs.commit_sha }}"
+            echo "- Image tag: ${{ steps.meta.outputs.image_tag }}"
+            echo "- Image: ${{ steps.meta.outputs.image_ref }}"
+            echo "- Image digest: ${{ steps.build.outputs.digest }}"
+            echo "- Release manifest artifact: release-manifest-${{ github.sha }}"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  deploy-stage:
+    name: Deploy to development (stage)
+    needs: build-and-push
+    runs-on: self-hosted
+    timeout-minutes: 30
+    environment:
+      name: development
+    concurrency:
+      group: deploy-stage
+      cancel-in-progress: false
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Validate stage secrets
+        env:
+          DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+          DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+          DB_USER: ${{ secrets.DB_USER }}
+          DB_PASS: ${{ secrets.DB_PASS }}
+          DB_NAME: ${{ secrets.DB_NAME }}
+          JWT_SECRET: ${{ secrets.JWT_SECRET }}
+          APP_PORT: ${{ secrets.APP_PORT }}
+        shell: bash
+        run: |
+          required=(DOCKERHUB_USERNAME DOCKERHUB_TOKEN DB_USER DB_PASS DB_NAME JWT_SECRET APP_PORT)
+          for key in "${required[@]}"; do
+            if [[ -z "${!key}" ]]; then
+              echo "Missing required development secret: ${key}"
+              exit 1
+            fi
+          done
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Pull image and resolve digest
+        id: artifact
+        shell: bash
+        run: |
+          image_ref="${{ needs.build-and-push.outputs.image_ref }}"
+          docker pull "${image_ref}"
+
+          digest="$(docker image inspect "${image_ref}" --format '{{index .RepoDigests 0}}' | awk -F'@' '{print $2}')"
+          if [[ -z "${digest}" ]]; then
+            echo "Cannot resolve digest for ${image_ref}"
+            exit 1
+          fi
+
+          echo "digest=${digest}" >> "${GITHUB_OUTPUT}"
+
+      - name: Deploy stage stack with docker compose
+        shell: bash
+        env:
+          IMAGE_REF: ${{ needs.build-and-push.outputs.image_ref }}
+          APP_PORT: ${{ secrets.APP_PORT }}
+          DB_USER: ${{ secrets.DB_USER }}
+          DB_PASS: ${{ secrets.DB_PASS }}
+          DB_NAME: ${{ secrets.DB_NAME }}
+          JWT_SECRET: ${{ secrets.JWT_SECRET }}
+          JWT_EXPIRES_IN: ${{ vars.JWT_EXPIRES_IN || '15m' }}
+          RABBITMQ_PREFETCH: ${{ vars.RABBITMQ_PREFETCH || '10' }}
+          ORDERS_MAX_ATTEMPTS: ${{ vars.ORDERS_MAX_ATTEMPTS || '3' }}
+          ORDERS_RETRY_BASE_DELAY_MS: ${{ vars.ORDERS_RETRY_BASE_DELAY_MS || '1000' }}
+          ORDERS_RETRY_MAX_DELAY_MS: ${{ vars.ORDERS_RETRY_MAX_DELAY_MS || '30000' }}
+          AWS_REGION: ${{ vars.AWS_REGION || 'eu-central-1' }}
+          AWS_S3_BUCKET: ${{ vars.AWS_S3_BUCKET || 'lesson9-files-private' }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        run: |
+          COMPOSE_PROJECT_NAME=orders-development docker compose -f deploy/compose.runtime.yml up -d --remove-orphans
+          COMPOSE_PROJECT_NAME=orders-development docker compose -f deploy/compose.runtime.yml ps
+
+      - name: Post-deploy health check
+        shell: bash
+        run: |
+          health_url="http://127.0.0.1:${{ secrets.APP_PORT }}/health"
+
+          for i in $(seq 1 30); do
+            response="$(curl -fsS "${health_url}" 2>/dev/null)" || true
+            if printf '%s' "${response}" | grep -Eq '"status"[[:space:]]*:[[:space:]]*"ok"'; then
+              exit 0
+            fi
+            echo "Healthcheck attempt ${i}/30 failed. Retrying in 10s..."
+            sleep 10
+          done
+
+          echo "Stage healthcheck failed: ${health_url}"
+          exit 1
+
+      - name: Deployment summary
+        shell: bash
+        run: |
+          {
+            echo "## Development (stage) deploy completed"
+            echo "- Commit SHA: ${{ needs.build-and-push.outputs.commit_sha }}"
+            echo "- Image tag: ${{ needs.build-and-push.outputs.image_tag }}"
+            echo "- Image digest: ${{ steps.artifact.outputs.digest }}"
+            echo "- Target environment: development"
+            echo "- Healthcheck URL: http://127.0.0.1:${{ secrets.APP_PORT }}/health"
+          } >> "$GITHUB_STEP_SUMMARY"
