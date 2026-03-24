@@ -309,6 +309,80 @@ Evaluate Docker Scout policies and fail on policy violations:
 docker scout policy --exit-code local://e-tech:prod-distroless
 ```
 
+## 7. CI/CD Pipeline (GitHub Actions)
+
+This repository uses three workflows:
+
+- `.github/workflows/pr-checks.yml`
+- `.github/workflows/build-and-stage.yml`
+- `.github/workflows/deploy-prod.yml`
+
+### Branch model
+
+- `feature/*` -> PR to `develop`
+- `develop` -> stage line
+- `main` -> production line
+
+### What each workflow does
+
+1. `pr-checks.yml` (trigger: `pull_request` to `develop` / `main`)
+- checkout
+- `npm ci`
+- lint
+- unit tests
+- extra quality gate: Docker build validation
+
+2. `build-and-stage.yml` (trigger: `push` to `develop`, or manual)
+- builds Docker image
+- pushes immutable tag: `sha-<full_commit_sha>`
+- generates and uploads `release-manifest.json` artifact
+- deploys to `development` environment on self-hosted runner
+- runs post-deploy health check: `GET /health`
+
+3. `deploy-prod.yml` (trigger: manual `workflow_dispatch`)
+- requires `image_tag` input (`sha-...`)
+- deploys to `production` environment
+- reuses the same artifact tag (no image rebuild)
+- uses `concurrency` lock to prevent parallel production deploys
+- runs post-deploy health check
+
+### Required GitHub setup
+
+1. Repository Environments:
+- `development`
+- `production` (enable required reviewers for manual approval)
+
+2. Environment secrets in both environments:
+- `DOCKERHUB_USERNAME`
+- `DOCKERHUB_TOKEN`
+- `DB_USER`
+- `DB_PASS`
+- `DB_NAME`
+- `JWT_SECRET`
+- `APP_PORT`
+- optional AWS secrets if S3 integration is used
+
+3. Branch protection:
+- for `develop` and `main`
+- enable `Require status checks to pass before merging`
+- add required checks from `pr-checks.yml` jobs
+
+### How to run end-to-end
+
+1. Open PR into `develop` -> wait for `PR Check`.
+2. Merge PR into `develop` -> `Build And Stage` runs automatically.
+3. Copy image tag from build summary (`sha-...`).
+4. Run `Deploy Prod` manually in Actions with this `image_tag`.
+5. Approve production deployment in `production` environment approval screen.
+
+### Evidence for submission (screenshots)
+
+- successful PR workflow (`PR Check`)
+- successful `Build And Stage` (build + stage deploy)
+- production approval screen (`production` environment reviewers)
+- successful `Deploy Prod`
+
+
 ## Modules
 - Users (`/users`)
 - Orders (`/orders`)
