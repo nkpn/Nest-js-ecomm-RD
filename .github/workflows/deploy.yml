@@ -16,7 +16,7 @@ permissions:
 
 jobs:
   deploy-stage:
-    name: Deploy to stage
+    name: Deploy to development (stage)
     if: >
       github.event_name == 'workflow_run' &&
       github.event.workflow_run.conclusion == 'success' &&
@@ -24,7 +24,7 @@ jobs:
     runs-on: self-hosted
     timeout-minutes: 30
     environment:
-      name: stage
+      name: development
     concurrency:
       group: deploy-stage
       cancel-in-progress: false
@@ -61,7 +61,7 @@ jobs:
           required=(DOCKERHUB_USERNAME DOCKERHUB_TOKEN DB_USER DB_PASS DB_NAME JWT_SECRET APP_PORT)
           for key in "${required[@]}"; do
             if [[ -z "${!key}" ]]; then
-              echo "Missing required stage secret: ${key}"
+              echo "Missing required development secret: ${key}"
               exit 1
             fi
           done
@@ -106,8 +106,8 @@ jobs:
           AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
         run: |
-          COMPOSE_PROJECT_NAME=orders-stage docker compose -f deploy/compose.runtime.yml up -d --remove-orphans
-          COMPOSE_PROJECT_NAME=orders-stage docker compose -f deploy/compose.runtime.yml ps
+          COMPOSE_PROJECT_NAME=orders-development docker compose -f deploy/compose.runtime.yml up -d --remove-orphans
+          COMPOSE_PROJECT_NAME=orders-development docker compose -f deploy/compose.runtime.yml ps
 
       - name: Post-deploy health check
         shell: bash
@@ -129,11 +129,11 @@ jobs:
       - name: Deployment summary
         run: |
           {
-            echo "## Stage deploy completed"
+            echo "## Development (stage) deploy completed"
             echo "- Commit SHA: ${{ steps.meta.outputs.commit_sha }}"
             echo "- Image tag: ${{ steps.meta.outputs.image_tag }}"
             echo "- Image digest: ${{ steps.artifact.outputs.digest }}"
-            echo "- Target environment: stage"
+            echo "- Target environment: development"
             echo "- Healthcheck URL: http://127.0.0.1:${{ secrets.APP_PORT }}/health"
           } >> "$GITHUB_STEP_SUMMARY"
 
