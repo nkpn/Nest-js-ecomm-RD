@@ -147,6 +147,38 @@ jobs:
             fi
           done
 
+      - name: Resolve image reference
+        id: image
+        shell: bash
+        env:
+          IMAGE_REF_FROM_BUILD: ${{ needs.build-and-push.outputs.image_ref }}
+          COMMIT_SHA_FROM_BUILD: ${{ needs.build-and-push.outputs.commit_sha }}
+          DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+        run: |
+          image_ref="${IMAGE_REF_FROM_BUILD}"
+          commit_sha="${COMMIT_SHA_FROM_BUILD}"
+          source="needs"
+
+          if [[ -z "${commit_sha}" ]]; then
+            commit_sha="${GITHUB_SHA}"
+          fi
+
+          if [[ -z "${image_ref}" ]]; then
+            repo_name_lc="$(echo "${{ github.event.repository.name }}" | tr '[:upper:]' '[:lower:]')"
+            image_ref="${DOCKERHUB_USERNAME}/${repo_name_lc}:sha-${commit_sha}"
+            source="fallback"
+          fi
+
+          if [[ -z "${image_ref}" ]]; then
+            echo "Resolved image_ref is empty"
+            exit 1
+          fi
+
+          echo "image_ref=${image_ref}" >> "${GITHUB_OUTPUT}"
+          echo "commit_sha=${commit_sha}" >> "${GITHUB_OUTPUT}"
+          echo "image_tag=sha-${commit_sha}" >> "${GITHUB_OUTPUT}"
+          echo "source=${source}" >> "${GITHUB_OUTPUT}"
+
       - name: Log in to Docker Hub
         uses: docker/login-action@v3
         with:
@@ -157,7 +189,11 @@ jobs:
         id: artifact
         shell: bash
         run: |
-          image_ref="${{ needs.build-and-push.outputs.image_ref }}"
+          image_ref="${{ steps.image.outputs.image_ref }}"
+          if [[ -z "${image_ref}" ]]; then
+            echo "image_ref is empty before docker pull"
+            exit 1
+          fi
           docker pull "${image_ref}"
 
           digest="$(docker image inspect "${image_ref}" --format '{{index .RepoDigests 0}}' | awk -F'@' '{print $2}')"
@@ -171,7 +207,7 @@ jobs:
       - name: Deploy stage stack with docker compose
         shell: bash
         env:
-          IMAGE_REF: ${{ needs.build-and-push.outputs.image_ref }}
+          IMAGE_REF: ${{ steps.image.outputs.image_ref }}
           APP_PORT: ${{ secrets.APP_PORT }}
           DB_USER: ${{ secrets.DB_USER }}
           DB_PASS: ${{ secrets.DB_PASS }}
@@ -212,8 +248,9 @@ jobs:
         run: |
           {
             echo "## Development (stage) deploy completed"
-            echo "- Commit SHA: ${{ needs.build-and-push.outputs.commit_sha }}"
-            echo "- Image tag: ${{ needs.build-and-push.outputs.image_tag }}"
+            echo "- Commit SHA: ${{ steps.image.outputs.commit_sha }}"
+            echo "- Image tag: ${{ steps.image.outputs.image_tag }}"
+            echo "- Image source: ${{ steps.image.outputs.source }}"
             echo "- Image digest: ${{ steps.artifact.outputs.digest }}"
             echo "- Target environment: development"
             echo "- Healthcheck URL: http://127.0.0.1:${{ secrets.APP_PORT }}/health"
